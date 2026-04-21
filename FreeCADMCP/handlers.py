@@ -4,7 +4,7 @@
 # GitHub : https://github.com/Perro-Megabass
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
-"""Handlers MVP. Unidades: mm (default FreeCAD). Coordenadas: globales."""
+"""Action handlers. Units: mm (FreeCAD default). Coordinate system: global."""
 
 import os
 
@@ -249,7 +249,7 @@ def h_create_torus(params):
 
 
 def h_create_polygon_prism(params):
-    """Prisma regular N lados. Útil p.ej. tuerca hex (sides=6)."""
+    """Regular N-sided prism. Useful for hex nuts (sides=6), bolts, etc."""
     params = params or {}
     doc = _get_doc(params)
     sides = int(params.get("sides", 6))
@@ -308,7 +308,7 @@ def h_rotate(params):
 
 
 def h_extrude(params):
-    """Extrude una cara/shape en dirección."""
+    """Extrude a face/shape along a direction vector."""
     params = params or {}
     doc = _get_doc(params)
     src = _get_obj(doc, params["source"])
@@ -550,7 +550,7 @@ def h_sketch_add_arc(params):
 
 
 def h_sketch_add_rectangle(params):
-    """Agrega 4 líneas formando rectángulo."""
+    """Add 4 lines forming a closed rectangle to the sketch."""
     params = params or {}
     doc = _get_doc(params)
     sk = _get_obj(doc, params["sketch"])
@@ -567,7 +567,7 @@ def h_sketch_add_rectangle(params):
 
 
 def h_sketch_add_constraint(params):
-    """Constraint básica: 'horizontal'|'vertical'|'coincident'|'distance'|'radius'."""
+    """Basic sketch constraint: 'horizontal'|'vertical'|'distance'|'radius'."""
     import Sketcher
     params = params or {}
     doc = _get_doc(params)
@@ -638,7 +638,7 @@ def h_pocket(params):
 # ==================== ARRAYS ====================
 
 def h_linear_array(params):
-    """Patrón lineal N copias. Usa Part::FeaturePython + copias."""
+    """Linear pattern of N copies along XYZ delta."""
     params = params or {}
     doc = _get_doc(params)
     src = _get_obj(doc, params["source"])
@@ -660,7 +660,7 @@ def h_linear_array(params):
 
 
 def h_polar_array(params):
-    """Patrón polar N copias alrededor de eje."""
+    """Polar pattern of N copies around an axis."""
     params = params or {}
     doc = _get_doc(params)
     src = _get_obj(doc, params["source"])
@@ -698,7 +698,7 @@ def h_gui_screenshot(params):
 
 
 def h_gui_set_view(params):
-    """Vista estándar: iso|top|bottom|front|back|left|right|axometric."""
+    """Set standard view: iso|top|bottom|front|back|left|right."""
     import FreeCADGui as Gui
     params = params or {}
     view = (params.get("view") or "iso").lower()
@@ -874,10 +874,10 @@ def h_draft_text(params):
     return {"document": doc.Name, "object": _obj_info(obj)}
 
 
-# ==================== ASSEMBLY (Assembly4 básico) ====================
+# ==================== ASSEMBLY (basic attach) ====================
 
 def h_assembly_attach(params):
-    """Fija placement de objeto relativo a otro (attach básico)."""
+    """Fix object placement relative to a parent object (basic attach)."""
     params = params or {}
     doc = _get_doc(params)
     obj = _get_obj(doc, params["name"])
@@ -942,7 +942,7 @@ def h_fem_add_force(params):
     c = ObjectsFem.makeConstraintForce(doc, params.get("name", "Force"))
     c.Force = float(params.get("force", 1.0))
     d = _vec(params.get("direction", {"x": 0, "y": 0, "z": -1}))
-    # Asignar dirección requiere referencia geométrica; aquí solo magnitud.
+    # Assigning direction requires a geometric reference; magnitude only here.
     if params.get("references"):
         src = _get_obj(doc, params["references"]["object"])
         faces = params["references"].get("faces", [])
@@ -1067,7 +1067,7 @@ def h_sweep(params):
 # ==================== HOLE (PartDesign) ====================
 
 def h_hole(params):
-    """Hole PartDesign en Body. Requiere sketch con círculo(s) como profile."""
+    """PartDesign Hole in a Body. Requires a sketch with circle(s) as the profile."""
     params = params or {}
     doc = _get_doc(params)
     body = _get_obj(doc, params["body"])

@@ -4,7 +4,7 @@
 # GitHub : https://github.com/Perro-Megabass
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
-"""Cliente TCP JSONL al bridge de FreeCAD (thread-safe)."""
+"""Thread-safe TCP JSONL client for the FreeCAD MCP bridge."""
 
 import json
 import os
@@ -52,7 +52,7 @@ class BridgeClient:
                 line = self._file.readline()
             except Exception:
                 self._close()
-                # Un reintento tras reconectar
+                # One retry after reconnect
                 self._connect()
                 self._file.write(json.dumps(req) + "\n")
                 self._file.flush()

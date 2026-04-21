@@ -4,7 +4,7 @@
 # GitHub : https://github.com/Perro-Megabass
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
-"""Registro del Workbench en FreeCAD GUI."""
+"""Workbench registration for the FreeCAD MCP Bridge."""
 
 import FreeCADGui as Gui
 
