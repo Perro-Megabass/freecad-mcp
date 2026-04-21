@@ -1,0 +1,204 @@
+================================================================
+FreeCAD MCP — Installation Guide
+================================================================
+
+Enables Claude Desktop to control FreeCAD via the Model Context
+Protocol (MCP). Architecture: FreeCAD Workbench (TCP socket server)
++ external Python MCP server (stdio) consumed by Claude Desktop.
+
+----------------------------------------------------------------
+1. REQUIREMENTS
+----------------------------------------------------------------
+- Windows 10/11, macOS, or Linux
+- FreeCAD 1.0+ (https://www.freecad.org)
+- Python 3.10+ installed and available on PATH
+- Claude Desktop (https://claude.ai/download)
+- This repository cloned or copied to a known local path
+  (referred to as <PROJECT_DIR> below)
+
+Verify:
+    python --version
+    freecad --version    (optional)
+
+----------------------------------------------------------------
+2. INSTALL PYTHON DEPENDENCIES
+----------------------------------------------------------------
+Install the MCP SDK in the Python interpreter that Claude Desktop
+will use (default: whichever `python` resolves to on PATH):
+
+    python -m pip install --upgrade mcp
+
+Verify:
+    python -c "import mcp; print(mcp.__version__)"
+
+Expected: mcp 1.27.0 or higher.
+
+----------------------------------------------------------------
+3. INSTALL FREECAD WORKBENCH (ADD-ON)
+----------------------------------------------------------------
+Locate FreeCAD's user Mod directory. Open FreeCAD, go to the
+Python console (View > Panels > Python console) and run:
+
+    import os, FreeCAD
+    print(os.path.join(FreeCAD.getUserAppDataDir(), "Mod"))
+
+Copy the entire folder:
+
+    <PROJECT_DIR>/FreeCADMCP/
+
+into that Mod directory. Final layout should be:
+
+    <USER_MOD_DIR>/FreeCADMCP/
+        __init__.py
+        Init.py
+        InitGui.py
+        server.py
+        handlers.py
+        ui.py
+
+Restart FreeCAD after copying.
+
+----------------------------------------------------------------
+4. ACTIVATE THE WORKBENCH
+----------------------------------------------------------------
+In FreeCAD:
+    View > Workbench > MCP Bridge
+    (a dock panel appears on the right side)
+    Click "Connect"
+
+Expected status: "Listening on 127.0.0.1:9877"
+
+The bridge is now accepting TCP/JSONL requests on localhost.
+
+----------------------------------------------------------------
+5. CONFIGURE CLAUDE DESKTOP
+----------------------------------------------------------------
+Locate the Claude Desktop configuration file.
+
+- Windows (Store build / sandboxed):
+    %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\
+        claude_desktop_config.json
+
+- Windows (classic build):
+    %APPDATA%\Claude\claude_desktop_config.json
+
+- macOS:
+    ~/Library/Application Support/Claude/claude_desktop_config.json
+
+- Linux:
+    ~/.config/Claude/claude_desktop_config.json
+
+If the file does not exist, create it. Add (or merge) the
+"freecad" entry inside "mcpServers". Replace <PROJECT_DIR> with
+the absolute path to the repository on your machine (use forward
+slashes or escaped backslashes on Windows):
+
+    {
+      "mcpServers": {
+        "freecad": {
+          "command": "python",
+          "args": ["-m", "freecad_mcp"],
+          "cwd": "<PROJECT_DIR>",
+          "env": {
+            "PYTHONPATH": "<PROJECT_DIR>",
+            "FREECAD_ALLOW_RUN_PYTHON": "true"
+          }
+        }
+      }
+    }
+
+Notes:
+- Setting FREECAD_ALLOW_RUN_PYTHON to "true" enables the
+  `freecad_run_python` tool (arbitrary Python execution inside
+  FreeCAD). Disable by omitting the variable or setting "false"
+  if you want a stricter sandbox.
+- Optional environment overrides:
+    FREECAD_HOST (default 127.0.0.1)
+    FREECAD_PORT (default 9877)
+    FREECAD_TIMEOUT_SEC (default 60)
+
+----------------------------------------------------------------
+6. RESTART CLAUDE DESKTOP
+----------------------------------------------------------------
+Fully exit Claude Desktop (system tray > Quit), then relaunch.
+
+Verify the server loaded:
+    Settings > Developer > Local MCP servers > freecad
+    Status should be "running".
+
+If status is "failed", click "View logs" for diagnostics
+(common causes: wrong PYTHONPATH, missing mcp SDK, different
+python interpreter).
+
+----------------------------------------------------------------
+7. VALIDATION
+----------------------------------------------------------------
+With FreeCAD running and the workbench connected, in Claude
+Desktop run:
+
+    "Ping FreeCAD"
+
+Claude should invoke the `freecad_ping` tool and return the
+FreeCAD version. A successful response confirms the full chain:
+Claude Desktop -> MCP server (stdio) -> TCP socket -> FreeCAD.
+
+Optional manual test (independent of Claude):
+
+    cd <PROJECT_DIR>
+    python test_bridge.py
+
+Expected output: [OK] lines for ping, list_documents,
+new_document, list_objects.
+
+----------------------------------------------------------------
+8. DAILY USE
+----------------------------------------------------------------
+Each session:
+    1. Open FreeCAD
+    2. Activate "MCP Bridge" workbench
+    3. Click "Connect"
+    4. Open Claude Desktop
+
+To stop: click "Disconnect" in the workbench panel, or close
+FreeCAD. The MCP server process terminates with Claude Desktop.
+
+----------------------------------------------------------------
+9. TROUBLESHOOTING
+----------------------------------------------------------------
+- "NOT_CONNECTED" error in Claude responses:
+    FreeCAD is not running, or the workbench is not connected.
+    Activate MCP Bridge workbench and click Connect.
+
+- "No module named freecad_mcp":
+    PYTHONPATH or cwd in claude_desktop_config.json points to
+    the wrong directory. Must match <PROJECT_DIR> absolute path.
+
+- "No module named mcp":
+    Install MCP SDK in the Python interpreter Claude uses.
+    Check the interpreter path in the Claude Desktop log.
+
+- Port 9877 already in use:
+    Another process is bound. Change FREECAD_PORT in the client
+    environment and edit PORT in server.py accordingly.
+
+- "run_python disabled":
+    Add FREECAD_ALLOW_RUN_PYTHON=true to the env block in
+    claude_desktop_config.json.
+
+- Workbench not visible in FreeCAD:
+    Confirm the folder was copied to the correct Mod directory
+    (printed in step 3). Restart FreeCAD.
+
+----------------------------------------------------------------
+10. SECURITY NOTES
+----------------------------------------------------------------
+- The socket binds to 127.0.0.1 only (not exposed to the network).
+- Only use `FREECAD_ALLOW_RUN_PYTHON=true` on machines you
+  control. The tool executes arbitrary Python in FreeCAD's
+  context, including file system access.
+- Keep the workbench "Disconnected" when not actively using
+  Claude with FreeCAD.
+
+================================================================
+END
+================================================================

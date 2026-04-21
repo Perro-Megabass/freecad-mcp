@@ -1,0 +1,1 @@
+# FreeCAD MCP server package
