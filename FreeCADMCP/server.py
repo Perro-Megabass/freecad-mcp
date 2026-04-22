@@ -4,7 +4,7 @@
 # GitHub : https://github.com/Perro-Megabass
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
-"""TCP JSONL server singleton para FreeCAD MCP Bridge."""
+"""TCP JSONL server singleton for the FreeCAD MCP Bridge."""
 
 import json
 import queue
@@ -16,12 +16,12 @@ import FreeCAD as App
 
 from handlers import HANDLERS
 
-# Cola de tareas a ejecutar en hilo principal (GUI) de FreeCAD.
+# Task queue for execution on FreeCAD's main (GUI) thread.
 _main_queue = queue.Queue()
 
 
 def _pump_main_queue():
-    """Llamado por QTimer en hilo GUI. Ejecuta tareas pendientes."""
+    """Called by QTimer on the GUI thread. Drains pending tasks."""
     try:
         while True:
             fn, args, result_holder, event = _main_queue.get_nowait()
@@ -36,7 +36,7 @@ def _pump_main_queue():
 
 
 def run_on_main(fn, *args, timeout=30.0):
-    """Envia fn al hilo GUI y espera resultado."""
+    """Dispatch fn to the GUI thread and wait for the result."""
     result_holder = {}
     event = threading.Event()
     _main_queue.put((fn, args, result_holder, event))

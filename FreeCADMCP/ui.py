@@ -4,7 +4,7 @@
 # GitHub : https://github.com/Perro-Megabass
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
-"""DockWidget con Connect/Disconnect/Status."""
+"""DockWidget with Connect / Disconnect / Status for the FreeCAD MCP Bridge."""
 
 from PySide2 import QtCore, QtWidgets
 
@@ -42,7 +42,7 @@ class MCPDock(QtWidgets.QDockWidget):
         self._timer.timeout.connect(self.refresh)
         self._timer.start()
 
-        # Pump cola principal (ejecuta handlers en hilo GUI)
+        # Pump main-thread queue (runs handlers on the GUI thread)
         self._pump_timer = QtCore.QTimer(self)
         self._pump_timer.setInterval(50)
         self._pump_timer.timeout.connect(_pump_main_queue)

@@ -5,9 +5,9 @@
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
 """
-Cliente de prueba para freecad_bridge.
-Requiere: FreeCAD abierto + macro freecad_bridge.FCMacro ejecutada.
-Uso: python test_bridge.py
+Standalone test client for the FreeCAD MCP bridge.
+Requires: FreeCAD running with the MCP Bridge workbench connected.
+Usage: python test_bridge.py
 """
 
 import json

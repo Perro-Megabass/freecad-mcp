@@ -1,1 +1,6 @@
-# FreeCAD Init (modo App/headless). Vacío: carga del workbench se hace en InitGui.py.
+# FreeCAD MCP — Init.py
+# Author : Perro Megabass
+# GitHub : https://github.com/Perro-Megabass
+# Instagram: https://www.instagram.com/perromods/
+# License : MIT
+# App/headless init. Workbench loading is handled by InitGui.py.

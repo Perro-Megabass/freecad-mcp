@@ -25,44 +25,44 @@ def _call(action: str, params: dict | None = None) -> str:
 
 @mcp.tool()
 def freecad_ping() -> str:
-    """Verifica conexión con FreeCAD. Devuelve versión."""
+    """Ping FreeCAD bridge. Returns version info."""
     return _call("ping")
 
 
 @mcp.tool()
 def freecad_list_documents() -> str:
-    """Lista documentos abiertos en FreeCAD y el documento activo."""
+    """List open documents and the active document."""
     return _call("list_documents")
 
 
 @mcp.tool()
 def freecad_new_document(name: str = "Unnamed") -> str:
-    """Crea un nuevo documento FreeCAD con el nombre dado."""
+    """Create a new FreeCAD document with the given name."""
     return _call("new_document", {"name": name})
 
 
 @mcp.tool()
 def freecad_list_objects(document: str | None = None) -> str:
-    """Lista objetos de un documento (usa activo si no se especifica)."""
+    """List objects in a document (uses active document if not specified)."""
     params = {"document": document} if document else {}
     return _call("list_objects", params)
 
 
 @mcp.tool()
 def freecad_set_active_document(name: str) -> str:
-    """Establece el documento activo por nombre."""
+    """Set the active document by name."""
     return _call("set_active_document", {"name": name})
 
 
 @mcp.tool()
 def freecad_open_document(path: str) -> str:
-    """Abre un archivo .FCStd desde ruta absoluta."""
+    """Open a .FCStd file from an absolute path."""
     return _call("open_document", {"path": path})
 
 
 @mcp.tool()
 def freecad_save_document(path: str | None = None, document: str | None = None) -> str:
-    """Guarda documento. Si path se da, hace Save As. Si no, sobreescribe."""
+    """Save document. If path is given, performs Save As; otherwise overwrites."""
     params = {}
     if path:
         params["path"] = path
@@ -73,7 +73,7 @@ def freecad_save_document(path: str | None = None, document: str | None = None) 
 
 @mcp.tool()
 def freecad_recompute(document: str | None = None) -> str:
-    """Fuerza recompute del documento."""
+    """Force recompute of the document."""
     params = {"document": document} if document else {}
     return _call("recompute", params)
 
@@ -81,7 +81,7 @@ def freecad_recompute(document: str | None = None) -> str:
 @mcp.tool()
 def freecad_create_box(length: float = 10.0, width: float = 10.0, height: float = 10.0,
                        name: str = "Box", document: str | None = None) -> str:
-    """Crea caja paramétrica (Part::Box). Unidades: mm."""
+    """Create a parametric box (Part::Box). Units: mm."""
     params = {"length": length, "width": width, "height": height, "name": name}
     if document:
         params["document"] = document
@@ -91,7 +91,7 @@ def freecad_create_box(length: float = 10.0, width: float = 10.0, height: float 
 @mcp.tool()
 def freecad_create_cylinder(radius: float = 5.0, height: float = 10.0,
                             name: str = "Cylinder", document: str | None = None) -> str:
-    """Crea cilindro paramétrico (Part::Cylinder). Unidades: mm."""
+    """Create a parametric cylinder (Part::Cylinder). Units: mm."""
     params = {"radius": radius, "height": height, "name": name}
     if document:
         params["document"] = document
@@ -101,7 +101,7 @@ def freecad_create_cylinder(radius: float = 5.0, height: float = 10.0,
 @mcp.tool()
 def freecad_boolean_cut(base: str, tool: str, name: str = "Cut",
                         document: str | None = None) -> str:
-    """Booleano: base menos tool. Devuelve nuevo objeto (Part::Cut)."""
+    """Boolean cut: base minus tool. Returns new Part::Cut object."""
     params = {"base": base, "tool": tool, "name": name}
     if document:
         params["document"] = document
@@ -111,7 +111,7 @@ def freecad_boolean_cut(base: str, tool: str, name: str = "Cut",
 @mcp.tool()
 def freecad_boolean_fuse(base: str, tool: str, name: str = "Fusion",
                          document: str | None = None) -> str:
-    """Booleano: union base+tool (Part::Fuse)."""
+    """Boolean union: base + tool (Part::Fuse)."""
     params = {"base": base, "tool": tool, "name": name}
     if document:
         params["document"] = document
@@ -121,7 +121,7 @@ def freecad_boolean_fuse(base: str, tool: str, name: str = "Fusion",
 @mcp.tool()
 def freecad_boolean_common(base: str, tool: str, name: str = "Common",
                            document: str | None = None) -> str:
-    """Booleano: intersección base∩tool (Part::Common)."""
+    """Boolean intersection: base ∩ tool (Part::Common)."""
     params = {"base": base, "tool": tool, "name": name}
     if document:
         params["document"] = document
@@ -131,7 +131,7 @@ def freecad_boolean_common(base: str, tool: str, name: str = "Common",
 @mcp.tool()
 def freecad_export(path: str, objects: list[str] | None = None,
                    document: str | None = None) -> str:
-    """Exporta objetos a archivo (STEP/STL/IGES/BREP por extensión)."""
+    """Export objects to file (STEP/STL/IGES/BREP detected by extension)."""
     params = {"path": path}
     if objects:
         params["objects"] = objects
@@ -142,7 +142,7 @@ def freecad_export(path: str, objects: list[str] | None = None,
 
 @mcp.tool()
 def freecad_delete_object(name: str, document: str | None = None) -> str:
-    """Elimina objeto por nombre."""
+    """Delete an object by name."""
     params = {"name": name}
     if document:
         params["document"] = document
@@ -152,7 +152,7 @@ def freecad_delete_object(name: str, document: str | None = None) -> str:
 @mcp.tool()
 def freecad_create_sphere(radius: float = 5.0, name: str = "Sphere",
                           document: str | None = None) -> str:
-    """Crea esfera (Part::Sphere)."""
+    """Create a sphere (Part::Sphere). Units: mm."""
     p = {"radius": radius, "name": name}
     if document: p["document"] = document
     return _call("create_sphere", p)
@@ -161,7 +161,7 @@ def freecad_create_sphere(radius: float = 5.0, name: str = "Sphere",
 @mcp.tool()
 def freecad_create_cone(radius1: float = 5.0, radius2: float = 0.0, height: float = 10.0,
                         name: str = "Cone", document: str | None = None) -> str:
-    """Crea cono truncado (radius2=0 → cono puntiagudo)."""
+    """Create a cone/truncated cone (radius2=0 → sharp tip)."""
     p = {"radius1": radius1, "radius2": radius2, "height": height, "name": name}
     if document: p["document"] = document
     return _call("create_cone", p)
@@ -170,7 +170,7 @@ def freecad_create_cone(radius1: float = 5.0, radius2: float = 0.0, height: floa
 @mcp.tool()
 def freecad_create_torus(radius1: float = 10.0, radius2: float = 2.0,
                          name: str = "Torus", document: str | None = None) -> str:
-    """Crea toro. radius1=mayor, radius2=menor."""
+    """Create a torus. radius1=major radius, radius2=tube radius."""
     p = {"radius1": radius1, "radius2": radius2, "name": name}
     if document: p["document"] = document
     return _call("create_torus", p)
@@ -179,7 +179,7 @@ def freecad_create_torus(radius1: float = 10.0, radius2: float = 2.0,
 @mcp.tool()
 def freecad_create_polygon_prism(sides: int = 6, radius: float = 5.0, height: float = 5.0,
                                  name: str = "Prism", document: str | None = None) -> str:
-    """Prisma poligonal regular (sides=6 para hex, tuerca)."""
+    """Regular polygon prism (sides=6 for hex nut/bolt head)."""
     p = {"sides": sides, "radius": radius, "height": height, "name": name}
     if document: p["document"] = document
     return _call("create_polygon_prism", p)
@@ -189,7 +189,7 @@ def freecad_create_polygon_prism(sides: int = 6, radius: float = 5.0, height: fl
 def freecad_set_placement(name: str, base_x: float = 0, base_y: float = 0, base_z: float = 0,
                           axis_x: float = 0, axis_y: float = 0, axis_z: float = 1,
                           angle_deg: float = 0, document: str | None = None) -> str:
-    """Fija posición y rotación (axis-angle) de objeto."""
+    """Set position and rotation (axis-angle) of an object."""
     p = {"name": name,
          "base": {"x": base_x, "y": base_y, "z": base_z},
          "rot": {"axis": {"x": axis_x, "y": axis_y, "z": axis_z}, "angle_deg": angle_deg}}
@@ -200,7 +200,7 @@ def freecad_set_placement(name: str, base_x: float = 0, base_y: float = 0, base_
 @mcp.tool()
 def freecad_translate(name: str, dx: float = 0, dy: float = 0, dz: float = 0,
                       document: str | None = None) -> str:
-    """Traslada objeto por delta."""
+    """Translate an object by a delta vector."""
     p = {"name": name, "delta": {"x": dx, "y": dy, "z": dz}}
     if document: p["document"] = document
     return _call("translate", p)
@@ -210,7 +210,7 @@ def freecad_translate(name: str, dx: float = 0, dy: float = 0, dz: float = 0,
 def freecad_rotate(name: str, axis_x: float = 0, axis_y: float = 0, axis_z: float = 1,
                    angle_deg: float = 0, cx: float = 0, cy: float = 0, cz: float = 0,
                    document: str | None = None) -> str:
-    """Rota objeto alrededor de eje y centro."""
+    """Rotate an object around an axis and center point."""
     p = {"name": name,
          "axis": {"x": axis_x, "y": axis_y, "z": axis_z},
          "angle_deg": angle_deg,
@@ -223,7 +223,7 @@ def freecad_rotate(name: str, axis_x: float = 0, axis_y: float = 0, axis_z: floa
 def freecad_extrude(source: str, dx: float = 0, dy: float = 0, dz: float = 10,
                     solid: bool = True, name: str = "Extrude",
                     document: str | None = None) -> str:
-    """Extruye objeto fuente en dirección."""
+    """Extrude source object along a direction vector."""
     p = {"source": source, "direction": {"x": dx, "y": dy, "z": dz},
          "solid": solid, "name": name}
     if document: p["document"] = document
@@ -326,7 +326,7 @@ def freecad_import_file(path: str, document: str | None = None) -> str:
 
 @mcp.tool()
 def freecad_run_python(code: str) -> str:
-    """Ejecuta código Python arbitrario con App/Part/Gui/doc. Requiere FREECAD_ALLOW_RUN_PYTHON=true."""
+    """Execute arbitrary Python code with App/Part/Gui/doc in scope. Requires FREECAD_ALLOW_RUN_PYTHON=true."""
     return _call("run_python", {"code": code})
 
 
@@ -344,7 +344,7 @@ def freecad_create_sketch(name: str = "Sketch", plane: str = "XY",
 @mcp.tool()
 def freecad_sketch_add_line(sketch: str, x1: float, y1: float, x2: float, y2: float,
                             document: str | None = None) -> str:
-    """Agrega línea al sketch."""
+    """Add a line segment to the sketch."""
     p = {"sketch": sketch, "x1": x1, "y1": y1, "x2": x2, "y2": y2}
     if document: p["document"] = document
     return _call("sketch_add_line", p)
@@ -353,7 +353,7 @@ def freecad_sketch_add_line(sketch: str, x1: float, y1: float, x2: float, y2: fl
 @mcp.tool()
 def freecad_sketch_add_circle(sketch: str, cx: float, cy: float, radius: float,
                               document: str | None = None) -> str:
-    """Agrega círculo al sketch."""
+    """Add a circle to the sketch."""
     p = {"sketch": sketch, "cx": cx, "cy": cy, "radius": radius}
     if document: p["document"] = document
     return _call("sketch_add_circle", p)
@@ -373,7 +373,7 @@ def freecad_sketch_add_arc(sketch: str, cx: float, cy: float, radius: float,
 @mcp.tool()
 def freecad_sketch_add_rectangle(sketch: str, x1: float, y1: float, x2: float, y2: float,
                                  document: str | None = None) -> str:
-    """Agrega rectángulo (4 líneas) al sketch."""
+    """Add a rectangle (4 lines) to the sketch."""
     p = {"sketch": sketch, "x1": x1, "y1": y1, "x2": x2, "y2": y2}
     if document: p["document"] = document
     return _call("sketch_add_rectangle", p)
@@ -426,7 +426,7 @@ def freecad_pocket(body: str, sketch: str, length: float = 10.0,
 def freecad_linear_array(source: str, count: int = 2,
                          dx: float = 10.0, dy: float = 0.0, dz: float = 0.0,
                          name: str | None = None, document: str | None = None) -> str:
-    """Patrón lineal de copias."""
+    """Linear pattern of copies along XYZ delta."""
     p = {"source": source, "count": count, "dx": dx, "dy": dy, "dz": dz}
     if name: p["name"] = name
     if document: p["document"] = document
@@ -438,7 +438,7 @@ def freecad_polar_array(source: str, count: int = 4, total_angle_deg: float = 36
                         axis_x: float = 0, axis_y: float = 0, axis_z: float = 1,
                         cx: float = 0, cy: float = 0, cz: float = 0,
                         name: str | None = None, document: str | None = None) -> str:
-    """Patrón polar de copias alrededor de eje."""
+    """Polar pattern of copies around an axis."""
     p = {"source": source, "count": count, "total_angle_deg": total_angle_deg,
          "axis": {"x": axis_x, "y": axis_y, "z": axis_z},
          "center": {"x": cx, "y": cy, "z": cz}}
@@ -457,7 +457,7 @@ def freecad_gui_screenshot(path: str, width: int = 1280, height: int = 720) -> s
 
 @mcp.tool()
 def freecad_gui_set_view(view: str = "iso") -> str:
-    """Vista estándar: iso|top|bottom|front|back|left|right."""
+    """Set standard viewport: iso|top|bottom|front|back|left|right."""
     return _call("gui_set_view", {"view": view})
 
 
@@ -487,7 +487,7 @@ def freecad_get_volume(name: str, document: str | None = None) -> str:
 
 @mcp.tool()
 def freecad_get_area(name: str, document: str | None = None) -> str:
-    """Área superficial del shape (mm²)."""
+    """Surface area of the shape (mm²)."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("get_area", p)
@@ -537,7 +537,7 @@ def freecad_export_stl(path: str, objects: list[str] | None = None,
 @mcp.tool()
 def freecad_techdraw_create_page(name: str = "Page", template: str | None = None,
                                  document: str | None = None) -> str:
-    """Crea página TechDraw con template SVG (por defecto A4 landscape)."""
+    """Create a TechDraw page with an SVG template (default: A4 landscape)."""
     p = {"name": name}
     if template: p["template"] = template
     if document: p["document"] = document
@@ -549,7 +549,7 @@ def freecad_techdraw_add_view(page: str, source: str, name: str = "View",
                               dir_x: float = 0, dir_y: float = 0, dir_z: float = 1,
                               scale: float = 1.0, x: float = 100.0, y: float = 100.0,
                               document: str | None = None) -> str:
-    """Agrega vista 2D de objeto a página TechDraw."""
+    """Add a 2D view of an object to a TechDraw page."""
     p = {"page": page, "source": source, "name": name,
          "direction": {"x": dir_x, "y": dir_y, "z": dir_z},
          "scale": scale, "x": x, "y": y}
@@ -562,7 +562,7 @@ def freecad_techdraw_add_view(page: str, source: str, name: str = "View",
 @mcp.tool()
 def freecad_draft_line(x1: float, y1: float, z1: float, x2: float, y2: float, z2: float,
                        name: str | None = None, document: str | None = None) -> str:
-    """Línea Draft (3D)."""
+    """Create a Draft line (3D)."""
     p = {"p1": {"x": x1, "y": y1, "z": z1}, "p2": {"x": x2, "y": y2, "z": z2}}
     if name: p["name"] = name
     if document: p["document"] = document
@@ -574,7 +574,7 @@ def freecad_draft_dimension(x1: float, y1: float, z1: float,
                             x2: float, y2: float, z2: float,
                             tx: float = 0, ty: float = 0, tz: float = 0,
                             document: str | None = None) -> str:
-    """Cota lineal Draft entre 2 puntos (tx,ty,tz = posición texto)."""
+    """Draft linear dimension between 2 points (tx,ty,tz = text position)."""
     p = {"p1": {"x": x1, "y": y1, "z": z1}, "p2": {"x": x2, "y": y2, "z": z2},
          "p_text": {"x": tx, "y": ty, "z": tz}}
     if document: p["document"] = document
@@ -584,7 +584,7 @@ def freecad_draft_dimension(x1: float, y1: float, z1: float,
 @mcp.tool()
 def freecad_draft_text(text: str, x: float = 0, y: float = 0, z: float = 0,
                        document: str | None = None) -> str:
-    """Texto Draft en posición 3D."""
+    """Place a Draft text annotation at a 3D position."""
     p = {"text": text, "position": {"x": x, "y": y, "z": z}}
     if document: p["document"] = document
     return _call("draft_text", p)
@@ -609,7 +609,7 @@ def freecad_assembly_attach(name: str, parent: str,
 
 @mcp.tool()
 def freecad_fem_create_analysis(name: str = "Analysis", document: str | None = None) -> str:
-    """Crea análisis FEM con solver CalculiX."""
+    """Create a FEM analysis with CalculiX solver."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("fem_create_analysis", p)
@@ -618,7 +618,7 @@ def freecad_fem_create_analysis(name: str = "Analysis", document: str | None = N
 @mcp.tool()
 def freecad_fem_add_material(analysis: str, material: str = "Steel-Generic",
                              name: str = "Material", document: str | None = None) -> str:
-    """Añade material FEM al análisis."""
+    """Add a FEM material to the analysis."""
     p = {"analysis": analysis, "material": material, "name": name}
     if document: p["document"] = document
     return _call("fem_add_material", p)
@@ -664,7 +664,7 @@ def freecad_cam_create_job(source: str, name: str = "Job",
 @mcp.tool()
 def freecad_cam_profile(job: str, name: str = "Profile",
                         document: str | None = None) -> str:
-    """Agrega operación Profile (contorno) al Job."""
+    """Add a Profile (contour) operation to a CAM Job."""
     p = {"job": job, "name": name}
     if document: p["document"] = document
     return _call("cam_profile", p)
@@ -675,7 +675,7 @@ def freecad_cam_profile(job: str, name: str = "Profile",
 @mcp.tool()
 def freecad_spreadsheet_create(name: str = "Spreadsheet",
                                document: str | None = None) -> str:
-    """Crea hoja de cálculo."""
+    """Create a spreadsheet object."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("spreadsheet_create", p)
@@ -745,7 +745,7 @@ def freecad_sweep(profile: str, path: str, solid: bool = True, frenet: bool = Fa
 def freecad_hole(body: str, sketch: str, diameter: float = 6.0, depth: float = 10.0,
                  threaded: bool = False, thread_type: str | None = None,
                  name: str = "Hole", document: str | None = None) -> str:
-    """Hole PartDesign en Body usando sketch con círculos."""
+    """PartDesign Hole in a Body using a sketch with circles as profile."""
     p = {"body": body, "sketch": sketch, "diameter": diameter, "depth": depth,
          "threaded": threaded, "name": name}
     if thread_type: p["thread_type"] = thread_type
@@ -782,7 +782,7 @@ def freecad_gui_select(objects: list[str], clear: bool = True,
 
 @mcp.tool()
 def freecad_gui_clear_selection() -> str:
-    """Limpia la selección actual."""
+    """Clear the current selection."""
     return _call("gui_clear_selection")
 
 
