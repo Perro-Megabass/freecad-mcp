@@ -3,10 +3,7 @@
 Control FreeCAD from Claude Desktop using the Model Context Protocol (MCP).  
 Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp).
 
-> **Author:** Perro Megabass  
-> **GitHub:** https://github.com/Perro-Megabass  
-> **Instagram:** https://www.instagram.com/perromods/  
-> **License:** MIT
+> **Instagram:** https://www.instagram.com/perromods/
 
 ---
 
@@ -259,4 +256,18 @@ MCP SDK not installed in the Python interpreter Claude uses.
 
 ## License
 
-MIT © [Perro Megabass](https://github.com/Perro-Megabass)
+MIT
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+## Disclaimer
+
+This is a third-party integration and not made by FreeCAD. Made by [PerroMods](https://www.instagram.com/perromods/).
+
+
