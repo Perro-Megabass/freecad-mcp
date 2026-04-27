@@ -44,6 +44,114 @@ def h_ping(params):
     }
 
 
+def h_get_capabilities(params):
+    """Return runtime capabilities so the agent can do status-first planning."""
+    try:
+        version = ".".join(App.Version()[0:3])
+        build = App.Version()[3] if len(App.Version()) > 3 else None
+    except Exception:
+        version = None
+        build = None
+
+    gui_available = False
+    workbenches = []
+    try:
+        import FreeCADGui as Gui
+        gui_available = True
+        workbenches = sorted(Gui.listWorkbenches().keys())
+    except Exception:
+        pass
+
+    wb = set(workbenches)
+    features = {
+        "core": True,
+        "sketcher": "SketcherWorkbench" in wb,
+        "partdesign": "PartDesignWorkbench" in wb,
+        "part": "PartWorkbench" in wb,
+        "draft": "DraftWorkbench" in wb,
+        "mesh": "MeshWorkbench" in wb,
+        "techdraw": "TechDrawWorkbench" in wb,
+        "fem": "FemWorkbench" in wb,
+        "cam": "CAMWorkbench" in wb,
+        "assembly": "AssemblyWorkbench" in wb,
+        "spreadsheet": "SpreadsheetWorkbench" in wb,
+        "gui": gui_available,
+    }
+
+    domains = {
+        "core": {
+            "enabled": True,
+            "message": "Core modeling tools are available.",
+        },
+        "sketcher": {
+            "enabled": features["sketcher"],
+            "message": "Sketcher is available." if features["sketcher"]
+            else "Sketcher workbench not loaded. Enable SketcherWorkbench in FreeCAD.",
+        },
+        "partdesign": {
+            "enabled": features["partdesign"],
+            "message": "PartDesign is available." if features["partdesign"]
+            else "PartDesign workbench not loaded. Enable PartDesignWorkbench in FreeCAD.",
+        },
+        "part": {
+            "enabled": features["part"],
+            "message": "Part workbench is available." if features["part"]
+            else "Part workbench not loaded. Enable PartWorkbench in FreeCAD.",
+        },
+        "draft": {
+            "enabled": features["draft"],
+            "message": "Draft workbench is available." if features["draft"]
+            else "Draft workbench not loaded. Enable DraftWorkbench in FreeCAD.",
+        },
+        "mesh": {
+            "enabled": features["mesh"],
+            "message": "Mesh tools are available." if features["mesh"]
+            else "Mesh workbench not loaded. Enable MeshWorkbench in FreeCAD.",
+        },
+        "techdraw": {
+            "enabled": features["techdraw"],
+            "message": "TechDraw is available." if features["techdraw"]
+            else "TechDraw workbench not loaded. Enable TechDrawWorkbench in FreeCAD.",
+        },
+        "fem": {
+            "enabled": features["fem"],
+            "message": "FEM tools are available." if features["fem"]
+            else "FEM workbench not loaded. Enable FemWorkbench in FreeCAD.",
+        },
+        "cam": {
+            "enabled": features["cam"],
+            "message": "CAM tools are available." if features["cam"]
+            else "CAM workbench not loaded. Enable CAMWorkbench in FreeCAD.",
+        },
+        "assembly": {
+            "enabled": features["assembly"],
+            "message": "Assembly tools are available." if features["assembly"]
+            else "Assembly workbench not loaded. Enable AssemblyWorkbench in FreeCAD.",
+        },
+        "spreadsheet": {
+            "enabled": features["spreadsheet"],
+            "message": "Spreadsheet tools are available." if features["spreadsheet"]
+            else "Spreadsheet workbench not loaded. Enable SpreadsheetWorkbench in FreeCAD.",
+        },
+        "gui": {
+            "enabled": features["gui"],
+            "message": "GUI session detected." if features["gui"]
+            else "GUI is not available (headless mode). GUI-only tools are disabled.",
+        },
+    }
+
+    return {
+        "freecad": {"version": version, "build": build},
+        "bridge": {"tool_count": len(HANDLERS)},
+        "capabilities": {
+            "gui_available": gui_available,
+            "workbenches": workbenches,
+            "features": features,
+            "domains": domains,
+        },
+    }
+
+
 def h_list_documents(params):
     active = App.ActiveDocument.Name if App.ActiveDocument else None
     docs = [{"name": d.Name, "label": d.Label} for d in App.listDocuments().values()]
@@ -59,6 +167,104 @@ def h_new_document(params):
 def h_list_objects(params):
     doc = _get_doc(params)
     return {"document": doc.Name, "objects": [_obj_info(o) for o in doc.Objects]}
+
+
+def h_get_scene_info(params):
+    """Rich textual snapshot of the active FreeCAD scene.
+
+    Returns document metadata, every object with bbox/volume/area/visibility,
+    current viewport camera, and current GUI selection — so the agent can
+    describe the scene without needing a screenshot.
+    """
+    doc = _get_doc(params)
+
+    # Document
+    doc_info = {
+        "name": doc.Name,
+        "label": doc.Label,
+        "path": doc.FileName or None,
+        "object_count": len(doc.Objects),
+    }
+    try:
+        doc_info["modified"] = bool(doc.isTouched())
+    except Exception:
+        pass
+
+    # Objects (rich)
+    objects = []
+    for o in doc.Objects:
+        info = _obj_info(o)
+        # Visibility
+        try:
+            vo = getattr(o, "ViewObject", None)
+            if vo is not None:
+                info["visible"] = bool(vo.Visibility)
+        except Exception:
+            pass
+        # Shape-derived info
+        try:
+            shp = getattr(o, "Shape", None)
+            if shp is not None and shp.BoundBox.isValid():
+                bb = shp.BoundBox
+                info["bbox"] = {
+                    "min": {"x": round(bb.XMin, 3), "y": round(bb.YMin, 3), "z": round(bb.ZMin, 3)},
+                    "max": {"x": round(bb.XMax, 3), "y": round(bb.YMax, 3), "z": round(bb.ZMax, 3)},
+                    "size": {"x": round(bb.XLength, 3), "y": round(bb.YLength, 3), "z": round(bb.ZLength, 3)},
+                }
+                try:
+                    info["volume"] = round(shp.Volume, 3)
+                except Exception:
+                    pass
+                try:
+                    info["area"] = round(shp.Area, 3)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        objects.append(info)
+
+    # Active viewport (camera)
+    view_info = {}
+    try:
+        import FreeCADGui as Gui
+        gui_doc = Gui.ActiveDocument
+        if gui_doc is not None:
+            v = gui_doc.ActiveView
+            try:
+                view_info["camera_type"] = v.getCameraType()
+            except Exception:
+                pass
+            try:
+                cam = v.getCameraNode()
+                pos = cam.position.getValue().getValue()
+                view_info["camera_position"] = {
+                    "x": round(pos[0], 3), "y": round(pos[1], 3), "z": round(pos[2], 3),
+                }
+                orient = cam.orientation.getValue().getValue()
+                view_info["camera_orientation_quat"] = [
+                    round(orient[0], 4), round(orient[1], 4),
+                    round(orient[2], 4), round(orient[3], 4),
+                ]
+            except Exception:
+                pass
+    except Exception as e:
+        view_info["error"] = f"No GUI view available: {e}"
+
+    # Selection
+    selection = []
+    try:
+        import FreeCADGui as Gui
+        for o in Gui.Selection.getSelection():
+            selection.append({"name": o.Name, "label": o.Label, "type": o.TypeId})
+    except Exception:
+        pass
+
+    return {
+        "document": doc_info,
+        "objects": objects,
+        "view": view_info,
+        "selection": selection,
+    }
 
 
 def h_set_active_document(params):
@@ -96,7 +302,7 @@ def h_save_document(params):
 def h_recompute(params):
     doc = _get_doc(params)
     doc.recompute()
-    return {"document": doc.Name, "ok": True}
+    return {"document": doc.Name, "recomputed": True}
 
 
 def h_create_box(params):
@@ -397,7 +603,7 @@ def h_get_object(params):
     for p in obj.PropertiesList:
         try:
             v = getattr(obj, p)
-            # Serializar solo primitivos
+            # Serialize only primitive values.
             if isinstance(v, (int, float, bool, str)) or v is None:
                 props[p] = v
             elif hasattr(v, "x") and hasattr(v, "y") and hasattr(v, "z"):
@@ -433,7 +639,7 @@ def h_set_label(params):
 
 
 def h_set_visibility(params):
-    """Requiere GUI."""
+    """Requires GUI."""
     import FreeCADGui as Gui
     params = params or {}
     doc = _get_doc(params)
@@ -468,7 +674,7 @@ def h_import_file(params):
 
 
 def h_run_python(params):
-    """Ejecuta Python arbitrario en contexto FreeCAD. Guardrail env var."""
+    """Execute arbitrary Python in FreeCAD context. Env-var guardrail."""
     if os.environ.get("FREECAD_ALLOW_RUN_PYTHON", "false").lower() != "true":
         raise PermissionError("run_python disabled. Set FREECAD_ALLOW_RUN_PYTHON=true to enable.")
     code = (params or {}).get("code")
@@ -487,7 +693,7 @@ def h_run_python(params):
 # ==================== SKETCHER ====================
 
 def h_create_sketch(params):
-    """Crea sketch en plano base (XY/XZ/YZ)."""
+    """Create sketch on base plane (XY/XZ/YZ)."""
     params = params or {}
     doc = _get_doc(params)
     name = params.get("name", "Sketch")
@@ -600,7 +806,7 @@ def h_create_body(params):
 
 
 def h_pad(params):
-    """Pad (extrude) de un sketch dentro de un Body."""
+    """Pad (extrude) a sketch inside a Body."""
     params = params or {}
     doc = _get_doc(params)
     body = _get_obj(doc, params["body"])
@@ -687,14 +893,39 @@ def h_polar_array(params):
 
 def h_gui_screenshot(params):
     import FreeCADGui as Gui
+    import base64
+    import tempfile
+
     params = params or {}
     path = params.get("path")
-    if not path:
-        raise ValueError("Missing 'path'")
     w = int(params.get("width", 1280))
     h = int(params.get("height", 720))
-    Gui.ActiveDocument.ActiveView.saveImage(path, w, h, "Current")
-    return {"path": path, "width": w, "height": h}
+
+    using_temp = False
+    if not path:
+        fd, path = tempfile.mkstemp(suffix=".png", prefix="freecad_mcp_shot_")
+        os.close(fd)
+        using_temp = True
+
+    try:
+        Gui.ActiveDocument.ActiveView.saveImage(path, w, h, "Current")
+        with open(path, "rb") as f:
+            image_bytes = f.read()
+        result = {
+            "width": w,
+            "height": h,
+            "format": "png",
+            "image_base64": base64.b64encode(image_bytes).decode("ascii"),
+        }
+        if not using_temp:
+            result["path"] = path
+        return result
+    finally:
+        if using_temp:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
 
 
 def h_gui_set_view(params):
@@ -750,7 +981,7 @@ def h_get_area(params):
 
 
 def h_get_distance(params):
-    """Distancia entre dos puntos o dos objetos (centros)."""
+    """Distance between two points or two objects (centers)."""
     params = params or {}
     if "a" in params and "b" in params:
         a = _vec(params["a"]); b = _vec(params["b"])
@@ -810,7 +1041,7 @@ def h_techdraw_create_page(params):
     if template_path and os.path.isfile(template_path):
         tmpl.Template = template_path
     else:
-        # Intenta template por defecto
+        # Try default template.
         import FreeCAD as _App
         default_tmpl = os.path.join(_App.getResourceDir(), "Mod", "TechDraw",
                                     "Templates", "A4_LandscapeTD.svg")
@@ -1146,9 +1377,11 @@ def h_gui_get_selection(params):
 
 HANDLERS = {
     "ping": h_ping,
+    "get_capabilities": h_get_capabilities,
     "list_documents": h_list_documents,
     "new_document": h_new_document,
     "list_objects": h_list_objects,
+    "get_scene_info": h_get_scene_info,
     "set_active_document": h_set_active_document,
     "open_document": h_open_document,
     "save_document": h_save_document,

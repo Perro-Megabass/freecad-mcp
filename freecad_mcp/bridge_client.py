@@ -17,6 +17,15 @@ PORT = int(os.environ.get("FREECAD_PORT", "9877"))
 TIMEOUT = float(os.environ.get("FREECAD_TIMEOUT_SEC", "60"))
 
 
+class BridgeClientError(Exception):
+    """Typed bridge error with stable code/message for MCP callers."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 class BridgeClient:
     def __init__(self):
         self._sock = None
@@ -24,8 +33,28 @@ class BridgeClient:
         self._lock = threading.Lock()
 
     def _connect(self):
-        self._sock = socket.create_connection((HOST, PORT), timeout=TIMEOUT)
-        self._file = self._sock.makefile("rw", encoding="utf-8", newline="\n")
+        try:
+            self._sock = socket.create_connection((HOST, PORT), timeout=TIMEOUT)
+            self._file = self._sock.makefile("rw", encoding="utf-8", newline="\n")
+        except ConnectionRefusedError:
+            self._close()
+            raise BridgeClientError(
+                "ADDON_NOT_CONNECTED",
+                f"Cannot connect to FreeCAD bridge at {HOST}:{PORT}. "
+                "Start FreeCAD and click Connect in FreeCADMCP workbench.",
+            )
+        except socket.timeout:
+            self._close()
+            raise BridgeClientError(
+                "CONNECTION_TIMEOUT",
+                f"Timed out connecting to FreeCAD bridge at {HOST}:{PORT}.",
+            )
+        except OSError as e:
+            self._close()
+            raise BridgeClientError(
+                "BRIDGE_CONNECT_FAILED",
+                f"Bridge connection failed at {HOST}:{PORT}: {e}",
+            )
 
     def _close(self):
         try:
@@ -50,17 +79,37 @@ class BridgeClient:
                 self._file.write(json.dumps(req) + "\n")
                 self._file.flush()
                 line = self._file.readline()
-            except Exception:
+            except (socket.timeout, OSError):
                 self._close()
                 # One retry after reconnect
                 self._connect()
-                self._file.write(json.dumps(req) + "\n")
-                self._file.flush()
-                line = self._file.readline()
+                try:
+                    self._file.write(json.dumps(req) + "\n")
+                    self._file.flush()
+                    line = self._file.readline()
+                except (socket.timeout, OSError):
+                    self._close()
+                    raise BridgeClientError(
+                        "BRIDGE_IO_TIMEOUT",
+                        "Timeout/IO error while talking to FreeCAD bridge. "
+                        "Verify FreeCAD is responsive and retry.",
+                    )
             if not line:
                 self._close()
-                raise ConnectionError("Empty response from FreeCAD bridge")
-            return json.loads(line)
+                raise BridgeClientError(
+                    "EMPTY_RESPONSE",
+                    "Empty response from FreeCAD bridge. "
+                    "The addon may be disconnected or another service is using this port.",
+                )
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                self._close()
+                raise BridgeClientError(
+                    "INVALID_BRIDGE_RESPONSE",
+                    f"Invalid JSON response from {HOST}:{PORT}. "
+                    "This port may be occupied by a non-FreeCAD service.",
+                )
 
 
 CLIENT = BridgeClient()

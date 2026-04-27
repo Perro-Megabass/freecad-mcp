@@ -3,26 +3,43 @@
 Control FreeCAD from Claude Desktop using the Model Context Protocol (MCP).  
 Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp).
 
-> **Author:** Perro Megabass  
-> **GitHub:** https://github.com/Perro-Megabass  
-> **Instagram:** https://www.instagram.com/perromods/  
-> **License:** MIT
+> **Instagram:** https://www.instagram.com/perromods/
+
+---
+
+## Version
+
+**Current:** 1.1.1 | **Target FreeCAD:** 1.0.2
+
+### What's New in 1.1.1
+
+Compared to `1.0.0`, this release focuses on **production stability** and **agent UX predictability**:
+
+- ✅ Standardized MCP response envelope: `{ok, result|error}` for consistent parsing
+- ✅ Actionable bridge error taxonomy with stable error codes (ADDON_NOT_CONNECTED, BRIDGE_IO_TIMEOUT, etc.)
+- ✅ Runtime capability reporting with per-domain status objects (`enabled` + guidance message)
+- ✅ Text-first scene inspection policy (`freecad_get_scene_info`) — preferred over screenshots
+- ✅ Deterministic smoke tests with process-friendly exit codes
+- ✅ Explicit Error Code Reference for operator troubleshooting
+- ✅ FreeCAD-native parametric workflow alignment (Body → Sketch → constraints → Pad/Pocket)
 
 ---
 
 ## Features
 
-79 tools organized in 12 categories:
+79 tools organized in 12 domains:
 
-| Category | Tools |
+| Domain | Tools |
 |---|---|
 | Documents | new, open, save, list, set active |
+| Capabilities | **get_capabilities** (status-first runtime checks) |
+| Inspection | **get_scene_info** (rich textual snapshot — *preferred over screenshot*) |
 | Primitives | box, cylinder, sphere, cone, torus, polygon prism |
 | Booleans | cut, fuse, common |
 | Transformations | translate, rotate, set placement, mirror |
 | Operations | extrude, revolve, fillet, chamfer, loft, sweep |
 | Arrays | linear, polar |
-| Sketcher | sketch, line, circle, arc, rectangle, constraints |
+| Sketcher | sketch, line, circle, arc, rectangle, constraints (basic & advanced) |
 | PartDesign | body, pad, pocket, hole |
 | Measurements | bounding box, volume, area, distance |
 | Mesh | shape to mesh, export STL |
@@ -31,8 +48,36 @@ Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp).
 | FEM | analysis, material, fixed, force |
 | CAM | job, profile |
 | Spreadsheet | create, set cell, get cell |
-| GUI | screenshot, views, selection, color, transparency |
+| GUI | screenshot, viewport control, selection, color, transparency |
 | Dev | run_python (arbitrary FreeCAD API access) |
+
+### Why `get_scene_info` is Better Than Screenshots
+
+When you ask Claude to *"look at,"* *"describe,"* *"analyze,"* or *"take a screenshot"* of the scene:
+
+**Claude uses `freecad_get_scene_info`** — a single textual snapshot containing:
+- Active document (name, label, path, modified state, object count)
+- Every object (name, label, type, placement, visibility, bounding box, volume, area)
+- Active viewport camera (type, position, orientation)
+- Current GUI selection
+
+**Why?** You already see the FreeCAD viewport in real time. Sending an image back wastes tokens. `freecad_gui_screenshot` is still available for explicit image requests, but text inspection is the default.
+
+### Agent Behavior Alignment
+
+Two global MCP prompts guide Claude's behavior:
+
+1. **`scene_inspection_strategy`**  
+   Always start with `freecad_get_scene_info`; use `freecad_gui_screenshot` only on explicit image request.
+
+2. **`freecad_parametric_modeling_strategy`**  
+   Follow `Body → Sketch 2D → constraints → Pad/Pocket (and details)` workflow until final part.
+
+Both enforce:
+- **Prefer structured text over images** to reduce token usage
+- **Recompute and validate** before declaring completion
+- **Do not export automatically** — only on explicit user request
+- **Status-first checks** (`freecad_get_capabilities`) before optional domains (FEM/CAM/TechDraw/Mesh/Assembly)
 
 ---
 
@@ -62,7 +107,7 @@ python -c "import mcp; print(mcp.__version__)"
 
 ---
 
-### Step 2 — Clone the repository
+### Step 2 — Clone the Repository
 
 ```powershell
 git clone https://github.com/Perro-Megabass/freecad-mcp.git
@@ -177,22 +222,40 @@ Verify:
 
 ## Validation
 
-With FreeCAD connected, run this in a terminal to test the bridge independently:
+With FreeCAD running and the bridge connected, test the integration independently:
 
 ```powershell
 cd <PROJECT_DIR>
 python test_bridge.py
 ```
 
+This smoke test validates:
+
+| Check | Validates |
+|---|---|
+| `ping` | Bridge connectivity and FreeCAD version |
+| `get_capabilities` | Workbench availability and per-domain status |
+| `new_document` | Document creation |
+| `list_objects` | Object enumeration |
+| `recompute` | Parametric model updates and stable response envelope |
+| `get_scene_info` | Rich textual scene snapshot (preferred tool) |
+| `bogus_action_error` | Error envelope and code taxonomy (expects `INVALID_PARAMS`) |
+
 Expected output:
 
 ```
-[OK] ping
-[OK] list_documents
-[OK] new_document
-[OK] list_objects
-[FAIL] bogus_action   ← expected, tests error handling
+[PASS] ping
+[PASS] get_capabilities
+[PASS] new_document
+[PASS] list_objects
+[PASS] recompute
+[PASS] get_scene_info
+[PASS] bogus_action_error
+
+Summary: 7/7 checks passed
 ```
+
+Exit code: `0` (success) or `1` (failures) or `2` (connection error).
 
 ---
 
@@ -202,8 +265,10 @@ Expected output:
 |---|---|---|
 | `FREECAD_HOST` | `127.0.0.1` | Bridge host |
 | `FREECAD_PORT` | `9877` | Bridge port |
-| `FREECAD_TIMEOUT_SEC` | `60` | Per-call timeout |
+| `FREECAD_TIMEOUT_SEC` | `60` | Per-call timeout (seconds) |
 | `FREECAD_ALLOW_RUN_PYTHON` | `false` | Enable `freecad_run_python` tool |
+| `FREECAD_MCP_TELEMETRY` | `true` | Enable lightweight per-tool telemetry |
+| `FREECAD_MCP_TELEMETRY_PATH` | system temp | JSONL telemetry output path |
 
 ---
 
@@ -223,29 +288,45 @@ Example prompts:
 
 ## Troubleshooting
 
-**`NOT_CONNECTED` error**  
-FreeCAD is not running or the workbench is not connected.  
-→ Activate MCP Bridge workbench and click Connect.
+### Error Code Reference
+
+Bridge and client errors use **stable, actionable codes**. When something fails, the error code tells you exactly what to check:
+
+| Code | Meaning | Action |
+|---|---|---|
+| `ADDON_NOT_CONNECTED` | FreeCAD bridge is not listening | Open FreeCAD, activate MCP Bridge workbench, click **Connect** |
+| `CONNECTION_TIMEOUT` | TCP handshake timed out | Confirm FreeCAD is responsive; check port availability |
+| `BRIDGE_CONNECT_FAILED` | Socket connection error (OS/network) | Verify `FREECAD_HOST` and `FREECAD_PORT`; check firewall |
+| `BRIDGE_IO_TIMEOUT` | Request/response timed out mid-call | Retry; if persistent, simplify operation or restart bridge |
+| `EMPTY_RESPONSE` | Connection accepted but no payload | Reconnect bridge; ensure port is not hijacked by another service |
+| `INVALID_BRIDGE_RESPONSE` | Non-JSON response on configured port | Verify `FREECAD_PORT` points to FreeCAD MCP bridge (not another service) |
+| `NOT_CONNECTED` | Generic client-side connection failure | Verify FreeCAD is running and MCP Bridge workbench is connected |
+| `INVALID_PARAMS` | Unknown action or malformed parameters | Check action name; verify parameter schema in tool docs |
+| `NOT_FOUND` | Requested object/document not found | Verify object/document names; check active document context |
+| `FREECAD_ERROR` | Handler or runtime error inside FreeCAD | Review error message; verify inputs; retry with corrected values |
+
+### Common Issues
+
+**`NOT_CONNECTED` or `ADDON_NOT_CONNECTED`**  
+→ Open FreeCAD, activate **MCP Bridge** workbench, click **Connect**. Check status shows `Listening on 127.0.0.1:9877`.
 
 **`No module named freecad_mcp`**  
-`PYTHONPATH` or `cwd` in the config points to the wrong directory.  
-→ Verify `<PROJECT_DIR>` is the absolute path of this cloned repo.
+→ Verify `PYTHONPATH` and `cwd` in Claude Desktop config point to the correct directory (where you cloned the repo).
 
 **`No module named mcp`**  
-MCP SDK not installed in the Python interpreter Claude uses.  
-→ Check the interpreter path in the Claude Desktop log and install there:
+→ The Python interpreter Claude uses doesn't have the MCP SDK. Install it:
 ```powershell
 <python_path> -m pip install mcp
 ```
 
 **Port 9877 already in use**  
-→ Set `FREECAD_PORT` to another port and edit `PORT` in `FreeCADMCP/server.py`.
+→ Set `FREECAD_PORT` to a free port and edit `PORT = 9877` in `FreeCADMCP/server.py`.
 
 **`run_python disabled`**  
-→ Add `"FREECAD_ALLOW_RUN_PYTHON": "true"` to the `env` block in config.
+→ Add `"FREECAD_ALLOW_RUN_PYTHON": "true"` to the `env` section in Claude Desktop config.
 
 **Workbench not visible in FreeCAD**  
-→ Confirm `FreeCADMCP/` was copied to the correct Mod directory and restart FreeCAD.
+→ Confirm `FreeCADMCP/` folder was copied to the correct Mod directory and restart FreeCAD.
 
 ---
 
@@ -259,4 +340,16 @@ MCP SDK not installed in the Python interpreter Claude uses.
 
 ## License
 
-MIT © [Perro Megabass](https://github.com/Perro-Megabass)
+MIT
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+## Disclaimer
+
+This is a third-party integration and not made by FreeCAD. Made by [PerroMods](https://www.instagram.com/perromods/).

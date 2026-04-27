@@ -4,29 +4,94 @@
 # GitHub : https://github.com/Perro-Megabass
 # Instagram: https://www.instagram.com/perromods/
 # License : MIT
-"""MCP server stdio para FreeCAD. Ejecutar: python -m freecad_mcp"""
+"""FreeCAD MCP stdio server. Run with: python -m freecad_mcp"""
 
+import base64
 import json
+import os
+import tempfile
+import time
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 
-from .bridge_client import CLIENT
+from .bridge_client import CLIENT, BridgeClientError
 
 mcp = FastMCP("freecad")
 
+_TELEMETRY_ENABLED = os.getenv("FREECAD_MCP_TELEMETRY", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+_TELEMETRY_PATH = os.getenv(
+    "FREECAD_MCP_TELEMETRY_PATH",
+    os.path.join(tempfile.gettempdir(), "freecad_mcp_tool_events.jsonl"),
+)
+
+
+def _log_tool_event(action: str, success: bool, duration_ms: float, error: str | None = None) -> None:
+    """Append a lightweight per-tool execution event to local JSONL telemetry."""
+    if not _TELEMETRY_ENABLED:
+        return
+    event = {
+        "ts": time.time(),
+        "action": action,
+        "success": bool(success),
+        "duration_ms": round(float(duration_ms), 3),
+    }
+    if error:
+        event["error"] = str(error)
+    try:
+        with open(_TELEMETRY_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except Exception:
+        # Telemetry should never break tool execution.
+        pass
+
+
+def _error_envelope(code: str, message: str) -> dict:
+    return {"ok": False, "error": {"code": code, "message": message}}
+
+
+def _normalize_envelope(resp) -> dict:
+    """Normalize bridge payload into stable {ok, result|error} envelope."""
+    if not isinstance(resp, dict):
+        return _error_envelope("INVALID_BRIDGE_RESPONSE", "Bridge returned a non-object response")
+    if "ok" not in resp:
+        # Backward-compatible fallback for older bridge payloads.
+        return {"ok": True, "result": resp}
+    if resp.get("ok"):
+        return {"ok": True, "result": resp.get("result")}
+    err = resp.get("error")
+    if isinstance(err, dict) and err.get("code") and err.get("message"):
+        return {"ok": False, "error": {"code": err["code"], "message": err["message"]}}
+    return _error_envelope("FREECAD_ERROR", "Bridge returned an error without details")
+
 
 def _call(action: str, params: dict | None = None) -> str:
+    start = time.perf_counter()
     try:
         resp = CLIENT.call(action, params or {})
+    except BridgeClientError as e:
+        _log_tool_event(action, False, (time.perf_counter() - start) * 1000.0, e.message)
+        return json.dumps(_error_envelope(e.code, e.message), ensure_ascii=False)
     except Exception as e:
-        return json.dumps({"ok": False, "error": {"code": "NOT_CONNECTED", "message": str(e)}})
-    return json.dumps(resp, ensure_ascii=False)
+        _log_tool_event(action, False, (time.perf_counter() - start) * 1000.0, str(e))
+        return json.dumps(_error_envelope("NOT_CONNECTED", str(e)), ensure_ascii=False)
+    normalized = _normalize_envelope(resp)
+    success = bool(normalized.get("ok"))
+    _log_tool_event(action, success, (time.perf_counter() - start) * 1000.0)
+    return json.dumps(normalized, ensure_ascii=False)
 
 
 @mcp.tool()
 def freecad_ping() -> str:
     """Ping FreeCAD bridge. Returns version info."""
     return _call("ping")
+
+
+@mcp.tool()
+def freecad_get_capabilities() -> str:
+    """Get runtime capabilities/workbenches. Use this status-first before optional tools."""
+    return _call("get_capabilities")
 
 
 @mcp.tool()
@@ -46,6 +111,18 @@ def freecad_list_objects(document: str | None = None) -> str:
     """List objects in a document (uses active document if not specified)."""
     params = {"document": document} if document else {}
     return _call("list_objects", params)
+
+
+@mcp.tool()
+def freecad_get_scene_info(document: str | None = None) -> str:
+    """Rich textual snapshot of the FreeCAD scene — use this to "see" / "look at" / "describe" / "analyze" the scene WITHOUT taking a screenshot.
+
+    Returns JSON with: active document metadata, every object (name, label, type, placement, visibility, bounding box, volume, area), current viewport camera (type, position, orientation) and the current GUI selection.
+
+    PREFER THIS over freecad_gui_screenshot for any scene-inspection request — the user is already viewing the FreeCAD viewport on screen, so a screenshot is redundant and wastes tokens.
+    """
+    params = {"document": document} if document else {}
+    return _call("get_scene_info", params)
 
 
 @mcp.tool()
@@ -235,7 +312,7 @@ def freecad_revolve(source: str, axis_x: float = 0, axis_y: float = 0, axis_z: f
                     angle_deg: float = 360.0, bx: float = 0, by: float = 0, bz: float = 0,
                     solid: bool = True, name: str = "Revolve",
                     document: str | None = None) -> str:
-    """Revoluciona objeto fuente alrededor de eje."""
+    """Revolve a source object around an axis."""
     p = {"source": source, "axis": {"x": axis_x, "y": axis_y, "z": axis_z},
          "angle_deg": angle_deg, "base": {"x": bx, "y": by, "z": bz},
          "solid": solid, "name": name}
@@ -246,7 +323,7 @@ def freecad_revolve(source: str, axis_x: float = 0, axis_y: float = 0, axis_z: f
 @mcp.tool()
 def freecad_fillet(source: str, radius: float = 1.0, edges: list[int] | None = None,
                    name: str = "Fillet", document: str | None = None) -> str:
-    """Redondea aristas. edges=None → todas."""
+    """Round edges. edges=None means all edges."""
     p = {"source": source, "radius": radius, "name": name}
     if edges: p["edges"] = edges
     if document: p["document"] = document
@@ -256,7 +333,7 @@ def freecad_fillet(source: str, radius: float = 1.0, edges: list[int] | None = N
 @mcp.tool()
 def freecad_chamfer(source: str, size: float = 1.0, edges: list[int] | None = None,
                     name: str = "Chamfer", document: str | None = None) -> str:
-    """Achaflana aristas. edges=None → todas."""
+    """Chamfer edges. edges=None means all edges."""
     p = {"source": source, "size": size, "name": name}
     if edges: p["edges"] = edges
     if document: p["document"] = document
@@ -267,7 +344,7 @@ def freecad_chamfer(source: str, size: float = 1.0, edges: list[int] | None = No
 def freecad_mirror(source: str, nx: float = 0, ny: float = 0, nz: float = 1,
                    bx: float = 0, by: float = 0, bz: float = 0,
                    name: str = "Mirror", document: str | None = None) -> str:
-    """Espeja objeto respecto a plano (normal + base)."""
+    """Mirror an object across a plane (normal + base)."""
     p = {"source": source, "normal": {"x": nx, "y": ny, "z": nz},
          "base": {"x": bx, "y": by, "z": bz}, "name": name}
     if document: p["document"] = document
@@ -276,7 +353,7 @@ def freecad_mirror(source: str, nx: float = 0, ny: float = 0, nz: float = 1,
 
 @mcp.tool()
 def freecad_get_object(name: str, document: str | None = None) -> str:
-    """Devuelve todas las propiedades del objeto."""
+    """Return all available object properties."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("get_object", p)
@@ -284,7 +361,7 @@ def freecad_get_object(name: str, document: str | None = None) -> str:
 
 @mcp.tool()
 def freecad_set_property(name: str, property: str, value, document: str | None = None) -> str:
-    """Asigna valor a propiedad del objeto."""
+    """Assign a value to an object property."""
     p = {"name": name, "property": property, "value": value}
     if document: p["document"] = document
     return _call("set_property", p)
@@ -292,7 +369,7 @@ def freecad_set_property(name: str, property: str, value, document: str | None =
 
 @mcp.tool()
 def freecad_set_label(name: str, label: str, document: str | None = None) -> str:
-    """Cambia Label (nombre visible) del objeto."""
+    """Change the object's Label (display name)."""
     p = {"name": name, "label": label}
     if document: p["document"] = document
     return _call("set_label", p)
@@ -300,7 +377,7 @@ def freecad_set_label(name: str, label: str, document: str | None = None) -> str
 
 @mcp.tool()
 def freecad_set_visibility(name: str, visible: bool = True, document: str | None = None) -> str:
-    """Muestra/oculta objeto en viewport (requiere GUI)."""
+    """Show/hide object in the viewport (requires GUI)."""
     p = {"name": name, "visible": visible}
     if document: p["document"] = document
     return _call("set_visibility", p)
@@ -309,7 +386,7 @@ def freecad_set_visibility(name: str, visible: bool = True, document: str | None
 @mcp.tool()
 def freecad_duplicate(name: str, new_name: str | None = None,
                       document: str | None = None) -> str:
-    """Duplica objeto (copia de shape + placement)."""
+    """Duplicate object (shape + placement copy)."""
     p = {"name": name}
     if new_name: p["new_name"] = new_name
     if document: p["document"] = document
@@ -318,7 +395,7 @@ def freecad_duplicate(name: str, new_name: str | None = None,
 
 @mcp.tool()
 def freecad_import_file(path: str, document: str | None = None) -> str:
-    """Importa archivo (STEP/IGES/BREP/STL) al documento."""
+    """Import a file (STEP/IGES/BREP/STL) into the document."""
     p = {"path": path}
     if document: p["document"] = document
     return _call("import_file", p)
@@ -335,7 +412,7 @@ def freecad_run_python(code: str) -> str:
 @mcp.tool()
 def freecad_create_sketch(name: str = "Sketch", plane: str = "XY",
                           document: str | None = None) -> str:
-    """Crea sketch en plano XY|XZ|YZ."""
+    """Create a sketch on XY|XZ|YZ base plane."""
     p = {"name": name, "plane": plane}
     if document: p["document"] = document
     return _call("create_sketch", p)
@@ -363,7 +440,7 @@ def freecad_sketch_add_circle(sketch: str, cx: float, cy: float, radius: float,
 def freecad_sketch_add_arc(sketch: str, cx: float, cy: float, radius: float,
                            start_deg: float = 0, end_deg: float = 90,
                            document: str | None = None) -> str:
-    """Agrega arco al sketch (grados)."""
+    """Add an arc to the sketch (degrees)."""
     p = {"sketch": sketch, "cx": cx, "cy": cy, "radius": radius,
          "start_deg": start_deg, "end_deg": end_deg}
     if document: p["document"] = document
@@ -392,7 +469,7 @@ def freecad_sketch_add_constraint(sketch: str, type: str, geo_index: int = -1,
 
 @mcp.tool()
 def freecad_create_body(name: str = "Body", document: str | None = None) -> str:
-    """Crea PartDesign Body."""
+    """Create a PartDesign Body."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("create_body", p)
@@ -402,7 +479,7 @@ def freecad_create_body(name: str = "Body", document: str | None = None) -> str:
 def freecad_pad(body: str, sketch: str, length: float = 10.0,
                 reversed: bool = False, midplane: bool = False,
                 name: str = "Pad", document: str | None = None) -> str:
-    """Pad (extrude) de sketch dentro de Body."""
+    """Pad (extrude) a sketch inside a Body."""
     p = {"body": body, "sketch": sketch, "length": length,
          "reversed": reversed, "midplane": midplane, "name": name}
     if document: p["document"] = document
@@ -413,7 +490,7 @@ def freecad_pad(body: str, sketch: str, length: float = 10.0,
 def freecad_pocket(body: str, sketch: str, length: float = 10.0,
                    reversed: bool = False, name: str = "Pocket",
                    document: str | None = None) -> str:
-    """Pocket (cut) de sketch dentro de Body."""
+    """Pocket (cut) from a sketch inside a Body."""
     p = {"body": body, "sketch": sketch, "length": length,
          "reversed": reversed, "name": name}
     if document: p["document"] = document
@@ -450,9 +527,70 @@ def freecad_polar_array(source: str, count: int = 4, total_angle_deg: float = 36
 # ==================== GUI ====================
 
 @mcp.tool()
-def freecad_gui_screenshot(path: str, width: int = 1280, height: int = 720) -> str:
-    """Captura screenshot del viewport activo."""
-    return _call("gui_screenshot", {"path": path, "width": width, "height": height})
+def freecad_gui_screenshot(width: int = 1280, height: int = 720, path: str | None = None):
+    """Capture active viewport screenshot and return the image to the agent.
+
+    By default, the image is returned directly to the agent without saving it
+    to disk. If a 'path' (absolute path) is provided, it also writes the PNG
+    file at that location.
+    """
+    keep_file = bool(path)
+    target_path = path
+    if not target_path:
+        fd, target_path = tempfile.mkstemp(suffix=".png", prefix="freecad_mcp_shot_")
+        os.close(fd)
+
+    start = time.perf_counter()
+    try:
+        resp = CLIENT.call(
+            "gui_screenshot",
+            {"path": target_path, "width": width, "height": height},
+        )
+    except BridgeClientError as e:
+        _log_tool_event("gui_screenshot", False, (time.perf_counter() - start) * 1000.0, e.message)
+        if not keep_file:
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+        return json.dumps(_error_envelope(e.code, e.message), ensure_ascii=False)
+    except Exception as e:
+        _log_tool_event("gui_screenshot", False, (time.perf_counter() - start) * 1000.0, str(e))
+        if not keep_file:
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+        return json.dumps(_error_envelope("NOT_CONNECTED", str(e)), ensure_ascii=False)
+
+    resp = _normalize_envelope(resp)
+    if not resp.get("ok"):
+        _log_tool_event("gui_screenshot", False, (time.perf_counter() - start) * 1000.0,
+                        str((resp.get("error") or {}).get("message", "gui_screenshot failed")))
+        if not keep_file:
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+        return json.dumps(resp, ensure_ascii=False)
+
+    # Prefer base64 from handler (works in remote setups). Fallback: read local file.
+    result_data = resp.get("result") or {}
+    b64 = result_data.get("image_base64") if isinstance(result_data, dict) else None
+    try:
+        if b64:
+            image_bytes = base64.b64decode(b64)
+        else:
+            with open(target_path, "rb") as f:
+                image_bytes = f.read()
+        _log_tool_event("gui_screenshot", True, (time.perf_counter() - start) * 1000.0)
+        return Image(data=image_bytes, format="png")
+    finally:
+        if not keep_file:
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
 
 
 @mcp.tool()
@@ -463,7 +601,7 @@ def freecad_gui_set_view(view: str = "iso") -> str:
 
 @mcp.tool()
 def freecad_gui_fit_all() -> str:
-    """Ajusta vista a todos los objetos."""
+    """Fit view to all objects."""
     return _call("gui_fit_all")
 
 
@@ -471,7 +609,7 @@ def freecad_gui_fit_all() -> str:
 
 @mcp.tool()
 def freecad_get_bounding_box(name: str, document: str | None = None) -> str:
-    """BoundingBox de objeto: min/max/size."""
+    """Object bounding box: min/max/size."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("get_bounding_box", p)
@@ -479,7 +617,7 @@ def freecad_get_bounding_box(name: str, document: str | None = None) -> str:
 
 @mcp.tool()
 def freecad_get_volume(name: str, document: str | None = None) -> str:
-    """Volumen del shape (mm³)."""
+    """Shape volume (mm^3)."""
     p = {"name": name}
     if document: p["document"] = document
     return _call("get_volume", p)
@@ -498,7 +636,7 @@ def freecad_get_distance(name1: str | None = None, name2: str | None = None,
                          ax: float = 0, ay: float = 0, az: float = 0,
                          bx: float = 0, by: float = 0, bz: float = 0,
                          document: str | None = None) -> str:
-    """Distancia entre 2 objetos (por nombre) o 2 puntos (a/b)."""
+    """Distance between 2 objects (by name) or 2 points (a/b)."""
     if name1 and name2:
         p = {"name1": name1, "name2": name2}
     else:
@@ -514,7 +652,7 @@ def freecad_get_distance(name1: str | None = None, name2: str | None = None,
 def freecad_shape_to_mesh(source: str, linear_deflection: float = 0.1,
                           angular_deflection: float = 0.523599,
                           name: str | None = None, document: str | None = None) -> str:
-    """Convierte shape en mesh (para STL/3D print)."""
+    """Convert shape to mesh (for STL/3D printing)."""
     p = {"source": source, "linear_deflection": linear_deflection,
          "angular_deflection": angular_deflection}
     if name: p["name"] = name
@@ -525,7 +663,7 @@ def freecad_shape_to_mesh(source: str, linear_deflection: float = 0.1,
 @mcp.tool()
 def freecad_export_stl(path: str, objects: list[str] | None = None,
                        document: str | None = None) -> str:
-    """Exporta objetos a STL."""
+    """Export objects to STL."""
     p = {"path": path}
     if objects: p["objects"] = objects
     if document: p["document"] = document
@@ -597,7 +735,7 @@ def freecad_assembly_attach(name: str, parent: str,
                             offset_x: float = 0, offset_y: float = 0, offset_z: float = 0,
                             axis_x: float = 0, axis_y: float = 0, axis_z: float = 1,
                             angle_deg: float = 0, document: str | None = None) -> str:
-    """Fija objeto relativo a padre (placement compuesto)."""
+    """Attach object relative to parent (composed placement)."""
     p = {"name": name, "parent": parent,
          "offset": {"x": offset_x, "y": offset_y, "z": offset_z},
          "rot": {"axis": {"x": axis_x, "y": axis_y, "z": axis_z}, "angle_deg": angle_deg}}
@@ -628,7 +766,7 @@ def freecad_fem_add_material(analysis: str, material: str = "Steel-Generic",
 def freecad_fem_add_fixed(analysis: str, object: str | None = None,
                           faces: list[int] | None = None,
                           name: str = "Fixed", document: str | None = None) -> str:
-    """Constraint fijo FEM sobre caras de un objeto."""
+    """Add FEM fixed constraint on object faces."""
     p = {"analysis": analysis, "name": name}
     if object and faces:
         p["references"] = {"object": object, "faces": faces}
@@ -641,7 +779,7 @@ def freecad_fem_add_force(analysis: str, force: float = 1.0,
                           dx: float = 0, dy: float = 0, dz: float = -1,
                           object: str | None = None, faces: list[int] | None = None,
                           name: str = "Force", document: str | None = None) -> str:
-    """Constraint fuerza FEM sobre caras."""
+    """Add FEM force constraint on faces."""
     p = {"analysis": analysis, "force": force,
          "direction": {"x": dx, "y": dy, "z": dz}, "name": name}
     if object and faces:
@@ -655,7 +793,7 @@ def freecad_fem_add_force(analysis: str, force: float = 1.0,
 @mcp.tool()
 def freecad_cam_create_job(source: str, name: str = "Job",
                            document: str | None = None) -> str:
-    """Crea Job CAM/Path para objeto fuente."""
+    """Create a CAM/Path Job for source object."""
     p = {"source": source, "name": name}
     if document: p["document"] = document
     return _call("cam_create_job", p)
@@ -684,7 +822,7 @@ def freecad_spreadsheet_create(name: str = "Spreadsheet",
 @mcp.tool()
 def freecad_spreadsheet_set(sheet: str, cell: str, value, alias: str | None = None,
                             document: str | None = None) -> str:
-    """Asigna valor a celda (p.ej. 'A1'). Alias opcional para referenciar."""
+    """Set cell value (e.g. 'A1'). Optional alias for references."""
     p = {"sheet": sheet, "cell": cell, "value": value}
     if alias: p["alias"] = alias
     if document: p["document"] = document
@@ -693,7 +831,7 @@ def freecad_spreadsheet_set(sheet: str, cell: str, value, alias: str | None = No
 
 @mcp.tool()
 def freecad_spreadsheet_get(sheet: str, cell: str, document: str | None = None) -> str:
-    """Lee contenido y valor de celda."""
+    """Read cell content and evaluated value."""
     p = {"sheet": sheet, "cell": cell}
     if document: p["document"] = document
     return _call("spreadsheet_get", p)
@@ -704,7 +842,7 @@ def freecad_spreadsheet_get(sheet: str, cell: str, document: str | None = None) 
 @mcp.tool()
 def freecad_set_color(name: str, r: float = 0.8, g: float = 0.8, b: float = 0.8,
                       document: str | None = None) -> str:
-    """Color RGB 0-1 del objeto (GUI)."""
+    """Set object RGB color in range 0-1 (GUI)."""
     p = {"name": name, "r": r, "g": g, "b": b}
     if document: p["document"] = document
     return _call("set_color", p)
@@ -713,7 +851,7 @@ def freecad_set_color(name: str, r: float = 0.8, g: float = 0.8, b: float = 0.8,
 @mcp.tool()
 def freecad_set_transparency(name: str, transparency: int = 50,
                              document: str | None = None) -> str:
-    """Transparencia 0-100 (GUI)."""
+    """Set object transparency in range 0-100 (GUI)."""
     p = {"name": name, "transparency": transparency}
     if document: p["document"] = document
     return _call("set_transparency", p)
@@ -724,7 +862,7 @@ def freecad_set_transparency(name: str, transparency: int = 50,
 @mcp.tool()
 def freecad_loft(sections: list[str], solid: bool = True, ruled: bool = False,
                  name: str = "Loft", document: str | None = None) -> str:
-    """Loft entre secciones (>=2 objetos con Shape)."""
+    """Create loft between sections (>=2 objects with Shape)."""
     p = {"sections": sections, "solid": solid, "ruled": ruled, "name": name}
     if document: p["document"] = document
     return _call("loft", p)
@@ -733,7 +871,7 @@ def freecad_loft(sections: list[str], solid: bool = True, ruled: bool = False,
 @mcp.tool()
 def freecad_sweep(profile: str, path: str, solid: bool = True, frenet: bool = False,
                   name: str = "Sweep", document: str | None = None) -> str:
-    """Sweep de profile a lo largo de path."""
+    """Sweep a profile along a path."""
     p = {"profile": profile, "path": path, "solid": solid, "frenet": frenet, "name": name}
     if document: p["document"] = document
     return _call("sweep", p)
@@ -753,7 +891,7 @@ def freecad_hole(body: str, sketch: str, diameter: float = 6.0, depth: float = 1
     return _call("hole", p)
 
 
-# ==================== SKETCH CONSTRAINTS AVANZADOS ====================
+# ==================== ADVANCED SKETCH CONSTRAINTS ====================
 
 @mcp.tool()
 def freecad_sketch_add_constraint_advanced(sketch: str, type: str,
@@ -761,7 +899,7 @@ def freecad_sketch_add_constraint_advanced(sketch: str, type: str,
                                            vertex1: int = 1, vertex2: int = 1,
                                            geo_sym: int = -1,
                                            document: str | None = None) -> str:
-    """Constraint avanzado: parallel|perpendicular|tangent|equal|coincident|point_on_object|symmetric."""
+    """Advanced constraint: parallel|perpendicular|tangent|equal|coincident|point_on_object|symmetric."""
     p = {"sketch": sketch, "type": type,
          "geo1": geo1, "geo2": geo2,
          "vertex1": vertex1, "vertex2": vertex2, "geo_sym": geo_sym}
@@ -774,7 +912,7 @@ def freecad_sketch_add_constraint_advanced(sketch: str, type: str,
 @mcp.tool()
 def freecad_gui_select(objects: list[str], clear: bool = True,
                        document: str | None = None) -> str:
-    """Selecciona objetos en viewport. clear=True limpia antes."""
+    """Select objects in viewport. clear=True clears previous selection."""
     p = {"objects": objects, "clear": clear}
     if document: p["document"] = document
     return _call("gui_select", p)
@@ -788,8 +926,68 @@ def freecad_gui_clear_selection() -> str:
 
 @mcp.tool()
 def freecad_gui_get_selection() -> str:
-    """Devuelve objetos seleccionados actualmente."""
+    """Return currently selected objects."""
     return _call("gui_get_selection")
+
+
+@mcp.prompt()
+def scene_inspection_strategy() -> str:
+    """How the agent should inspect the FreeCAD scene with minimal token usage."""
+    return """When the user asks to "look at" / "see" / "describe" / "analyze" / "what is in" the FreeCAD scene, ALWAYS start with freecad_get_scene_info().
+
+Token-efficient defaults:
+1. Prefer freecad_get_scene_info() over freecad_gui_screenshot().
+2. Summarize only relevant objects/features requested by the user.
+3. Avoid repeated inspection calls unless geometry changed.
+
+Why:
+- The user already sees the FreeCAD viewport locally.
+- Screenshot payloads are expensive in tokens.
+- freecad_get_scene_info() provides structured geometry/context for precise textual answers.
+
+Use freecad_gui_screenshot() only when the user explicitly requests an image in chat (for example: "send a screenshot", "show me the picture")."""
+
+
+@mcp.prompt()
+def freecad_parametric_modeling_strategy() -> str:
+    """Preferred FreeCAD workflow: parametric 2D-to-3D modeling until final part."""
+    return """Use a FreeCAD-native parametric workflow by default:
+
+1. Start by understanding current state:
+   - Call freecad_get_scene_info() first.
+   - Call freecad_get_capabilities() once per session before optional domains.
+   - If no document exists, create one.
+
+2. Status-first checks for optional domains:
+   - Before FEM/CAM/TechDraw/Mesh/Assembly actions, verify capabilities first.
+   - If a domain is not available, explain clearly and use the closest supported fallback.
+
+3. Build parametric geometry in this order:
+   - Create/activate Body (freecad_create_body).
+   - Create Sketch on explicit plane (freecad_create_sketch).
+   - Add sketch geometry (lines/circles/arcs/rectangle).
+   - Add constraints and dimensions before 3D features.
+   - Recompute when needed.
+
+4. Convert 2D to 3D with PartDesign tools:
+   - Use freecad_pad / freecad_pocket as primary operations.
+   - Then apply detail operations (fillet/chamfer/patterns/mirror) if requested.
+   - Keep model editable and parametric; avoid arbitrary code unless necessary.
+
+5. Validate before declaring done:
+   - Recompute document.
+   - Verify resulting objects with freecad_list_objects/freecad_get_scene_info.
+   - If needed, check key metrics (bbox/volume/area/distance).
+
+6. Export policy:
+   - Do NOT export by default.
+   - Export (STL/STEP/other) only when user explicitly asks.
+   - If format/path is unclear, ask before exporting.
+
+7. Communication policy:
+   - Be concise and execution-oriented.
+   - Batch logical operations to reduce tool calls.
+   - Ask clarifying questions early when critical dimensions/constraints are missing."""
 
 
 if __name__ == "__main__":
