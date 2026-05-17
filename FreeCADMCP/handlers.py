@@ -674,9 +674,16 @@ def h_import_file(params):
 
 
 def h_run_python(params):
-    """Execute arbitrary Python in FreeCAD context. Env-var guardrail."""
-    if os.environ.get("FREECAD_ALLOW_RUN_PYTHON", "false").lower() != "true":
-        raise PermissionError("run_python disabled. Set FREECAD_ALLOW_RUN_PYTHON=true to enable.")
+    """Execute arbitrary Python in FreeCAD context.
+
+    Note: the user-facing opt-in (FREECAD_ALLOW_RUN_PYTHON=true) is enforced
+    on the MCP server side (freecad_mcp/__main__.py), because Claude Desktop
+    injects env vars into the MCP server process, not into the FreeCAD
+    process. Checking the env var here would always fail unless the user
+    launched FreeCAD from a shell with the env var pre-set, which is not the
+    documented setup. The bridge already binds to 127.0.0.1 only, so the
+    trust boundary is the local machine.
+    """
     code = (params or {}).get("code")
     if not code:
         raise ValueError("Missing 'code'")

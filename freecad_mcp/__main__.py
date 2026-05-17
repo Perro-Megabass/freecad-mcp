@@ -408,6 +408,15 @@ def freecad_import_file(path: str, document: str | None = None) -> str:
 @mcp.tool()
 def freecad_run_python(code: str) -> str:
     """Execute arbitrary Python code with App/Part/Gui/doc in scope. Requires FREECAD_ALLOW_RUN_PYTHON=true."""
+    # MCP-side gate: the env var lives in the MCP server process (set by
+    # Claude Desktop config), not necessarily in the FreeCAD process. Check
+    # here so the user sees a clear error without needing FreeCAD to read it.
+    if os.environ.get("FREECAD_ALLOW_RUN_PYTHON", "false").strip().lower() != "true":
+        return json.dumps(_error_envelope(
+            "PERMISSION_DENIED",
+            "run_python disabled. Set FREECAD_ALLOW_RUN_PYTHON=true in the "
+            "Claude Desktop config 'env' block and fully restart Claude Desktop."
+        ), ensure_ascii=False)
     return _call("run_python", {"code": code})
 
 
