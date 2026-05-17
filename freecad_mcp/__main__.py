@@ -178,7 +178,11 @@ def freecad_create_cylinder(radius: float = 5.0, height: float = 10.0,
 @mcp.tool()
 def freecad_boolean_cut(base: str, tool: str, name: str = "Cut",
                         document: str | None = None) -> str:
-    """Boolean cut: base minus tool. Returns new Part::Cut object."""
+    """Boolean cut: base minus tool. Returns new Part::Cut object.
+
+    Selection order: base first (kept), tool second (subtracted).
+    Tip: to avoid face-on-face failures, make the tool geometry overhang
+    the base on both sides instead of matching its face exactly."""
     params = {"base": base, "tool": tool, "name": name}
     if document:
         params["document"] = document
@@ -412,7 +416,13 @@ def freecad_run_python(code: str) -> str:
 @mcp.tool()
 def freecad_create_sketch(name: str = "Sketch", plane: str = "XY",
                           document: str | None = None) -> str:
-    """Create a sketch on XY|XZ|YZ base plane."""
+    """Create a sketch on XY|XZ|YZ base plane.
+
+    To extend an existing solid, prefer creating the sketch on a selected face
+    of the body (use freecad_gui_select first) so FreeCAD attaches the sketch
+    to that face. Use External Geometry to constrain against existing edges
+    instead of absolute coordinates. After adding geometry, the sketch must be
+    fully constrained before Pad/Pocket."""
     p = {"name": name, "plane": plane}
     if document: p["document"] = document
     return _call("create_sketch", p)
@@ -987,7 +997,150 @@ def freecad_parametric_modeling_strategy() -> str:
 7. Communication policy:
    - Be concise and execution-oriented.
    - Batch logical operations to reduce tool calls.
-   - Ask clarifying questions early when critical dimensions/constraints are missing."""
+   - Ask clarifying questions early when critical dimensions/constraints are missing.
+
+8. Hard rules (parametric correctness):
+   - To extend an existing solid, select a face of the body before creating the
+     sketch (freecad_gui_select), so the sketch attaches to that face.
+   - Constrain new sketches against the base solid via External Geometry,
+     not absolute coordinates.
+   - A sketch must be fully constrained before Pad/Pocket. Treat under- or
+     over-constrained sketches as failures and resolve before extruding.
+   - Never apply freecad_set_placement to a Pad/Pocket result; move its base
+     sketch instead — the feature is permanently bound to the sketch.
+   - Prefer freecad_linear_array / freecad_polar_array (Pattern) over duplicating
+     features manually; the result stays a single parametric solid.
+
+9. Reference policy:
+   - Always reference objects by their internal name (e.g. "Box001"), never by
+     user label. Internal names are what every tool resolves against."""
+
+
+@mcp.prompt()
+def workbench_selection_strategy() -> str:
+    """Decision tree for choosing the right FreeCAD workbench/domain per task."""
+    return """Pick the workbench/domain BEFORE choosing tools. Wrong workbench
+is the most common cause of dead-ends.
+
+Decision tree:
+
+- 3D-printable / mechanical / parametric solid part
+    -> PartDesign (Body + Sketch + Pad/Pocket/Hole + Fillet/Chamfer/Patterns).
+       Always solid, always editable. This is the default for "make a part".
+
+- Free-form CSG (booleans on primitives, no sketch needed)
+    -> Part (box/cylinder/sphere + boolean_cut/fuse/common).
+       Faster than PartDesign for quick assemblies of primitives.
+       Selection order in Cut: base first (kept), tool second (subtracted).
+
+- 2D drawing intended as paper / DXF / SVG output
+    -> Draft (line/wire/rectangle with grid + snap + working plane).
+       Do NOT use Sketcher for this — Sketcher is only a feed for Pad/Pocket.
+
+- 2D profile that will be extruded/revolved into 3D
+    -> Sketcher, inside PartDesign. Never "switch to Sketcher" — stay in
+       PartDesign; its toolbar already contains every Sketcher tool.
+
+- Architecture / BIM (walls, windows, slabs)
+    -> Arch (it supersets Draft — stay in Arch, do not toggle to Draft).
+
+- 2D engineering drawings of an existing 3D model
+    -> TechDraw (page from template + views of the 3D object).
+       TechDraw is for documenting a finished model, not for drawing 2D.
+
+- Structural simulation (deformation, stress)
+    -> FEM. Precondition: one single fused solid (Part.Fuse multi-bodies first),
+       a material, a constraint (Fixed), and a load (Force/Pressure).
+
+- Parametric values driving multiple features
+    -> Spreadsheet with aliases. Cells become parameters referenced from any
+       property via expressions. A single sheet cannot both write a property
+       and read the same property back (no circular dependencies).
+
+- Mesh / STL export for 3D printing
+    -> Mesh workbench: shape_to_mesh on the final solid, then export_stl.
+
+- CAM / G-code
+    -> CAM workbench: create_job on the solid, then profile/pocket operations.
+
+Always call freecad_get_capabilities() once per session before using FEM, CAM,
+TechDraw, Mesh, or Assembly tools — those domains may be disabled in the
+runtime."""
+
+
+@mcp.prompt()
+def drafting_2d_strategy() -> str:
+    """Canonical 2D drafting workflow with the Draft workbench."""
+    return """Use this flow when the deliverable is a 2D drawing (paper, DXF,
+SVG), not a 3D part. Tool family: freecad_draft_*.
+
+1. New document. Default working plane is XY (top view). Confirm with the user
+   if another plane is needed.
+
+2. Lay guidelines first:
+   - Use construction-mode-like lines (Draft lines) for the rough cage of the
+     drawing. They are references, not final geometry.
+
+3. Final geometry on top of guidelines:
+   - Use Draft lines/wires/rectangles snapped to the guideline intersections.
+   - Close wires when they must become a face later.
+
+4. Annotation:
+   - freecad_draft_dimension for measurements.
+   - freecad_draft_text for labels.
+
+5. Optional 2D -> 3D:
+   - A closed Draft wire can be padded/extruded later via Part Extrude.
+   - For parametric solids, recreate the profile in Sketcher under a Body
+     instead — Draft profiles are not parametric in the PartDesign sense.
+
+6. Export:
+   - DXF/SVG via freecad_export. Do NOT export unless the user asks.
+
+Never mix Draft and Sketcher for the same deliverable. Sketcher = 3D feed,
+Draft = 2D output."""
+
+
+@mcp.prompt()
+def fem_workflow_strategy() -> str:
+    """Canonical FEM analysis order in FreeCAD."""
+    return """FEM has strict preconditions. Validate each before moving on or
+the analysis silently produces garbage.
+
+0. Capability gate:
+   - Call freecad_get_capabilities() and confirm FEM is enabled. If not,
+     explain and stop.
+
+1. Geometry preparation:
+   - The FEM workbench can analyze ONE single solid at a time. If the model
+     has multiple bodies/parts, fuse them first (freecad_boolean_fuse).
+   - Hide non-structural decorative objects.
+
+2. Create the analysis container:
+   - freecad_fem_create_analysis on the fused solid.
+
+3. Material:
+   - freecad_fem_add_material with a realistic material (steel, aluminium,
+     concrete) — without material, the solver refuses to run.
+
+4. Boundary conditions, in this order:
+   - Fixed support first (freecad_fem_add_fixed) on the face(s) that anchor
+     the part.
+   - Then loads (freecad_fem_add_force) on the face(s) receiving force.
+
+5. Mesh:
+   - Generate the mesh AFTER constraints, not before — mesh quality depends
+     on the final geometry state.
+
+6. Solve and inspect:
+   - Run the solver, then inspect displacement/stress results.
+   - Communicate magnitudes and locations textually; do NOT push screenshots
+     unless explicitly requested.
+
+7. Iteration:
+   - If results look wrong, the usual root causes are: under-constrained
+     fixation, missing material, multi-solid input, or unrealistic load
+     magnitude. Re-check in that order."""
 
 
 if __name__ == "__main__":

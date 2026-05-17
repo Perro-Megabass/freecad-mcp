@@ -46,6 +46,7 @@ def run_on_main(fn, *args, timeout=30.0):
         raise result_holder["error"]
     return result_holder.get("value")
 
+
 HOST = "127.0.0.1"
 PORT = 9877
 MAX_MSG_BYTES = 5 * 1024 * 1024

@@ -13,3 +13,6 @@ venv/
 .DS_Store
 Thumbs.db
 Referencia/
+
+# Reference manuals (third-party copyright)
+a-freecad-manual.pdf

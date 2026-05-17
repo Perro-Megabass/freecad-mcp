@@ -9,7 +9,19 @@ Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp).
 
 ## Version
 
-**Current:** 1.1.1 | **Target FreeCAD:** 1.0.2
+**Current:** 1.2.0 | **Target FreeCAD:** 1.0.2
+
+### What's New in 1.2.0
+
+This release focuses on **agent decision quality** — fewer dead-ends, fewer wrong-workbench attempts, fewer wasted tool calls:
+
+- ✅ Three new MCP prompts steering Claude toward the correct workbench and workflow:
+  - `workbench_selection_strategy` — decision tree Part/PartDesign/Draft/Sketcher/Arch/TechDraw/FEM/Spreadsheet/Mesh/CAM
+  - `drafting_2d_strategy` — canonical Draft workflow for 2D deliverables (DXF/SVG)
+  - `fem_workflow_strategy` — strict FEM precondition order (single solid → material → BCs → mesh → solve)
+- ✅ Hardened `freecad_parametric_modeling_strategy` with 5 parametric-correctness rules (sketch-on-face, External Geometry, fully-constrained before extrude, Pad locked to sketch, prefer Pattern over duplication) and an explicit internal-name reference policy
+- ✅ Refined tool docstrings: `freecad_create_sketch` documents face attachment + constraint state, `freecad_boolean_cut` documents selection order + the oversize trick to avoid face-on-face failures
+- ✅ All guidance sourced from the official FreeCAD manual (Yorik) — verbatim rules where applicable
 
 ### What's New in 1.1.1
 
@@ -65,15 +77,24 @@ When you ask Claude to *"look at,"* *"describe,"* *"analyze,"* or *"take a scree
 
 ### Agent Behavior Alignment
 
-Two global MCP prompts guide Claude's behavior:
+Five global MCP prompts guide Claude's behavior:
 
 1. **`scene_inspection_strategy`**  
    Always start with `freecad_get_scene_info`; use `freecad_gui_screenshot` only on explicit image request.
 
-2. **`freecad_parametric_modeling_strategy`**  
-   Follow `Body → Sketch 2D → constraints → Pad/Pocket (and details)` workflow until final part.
+2. **`workbench_selection_strategy`**  
+   Decision tree for picking the right workbench/domain *before* picking tools. Covers Part vs PartDesign, Draft vs Sketcher, Arch/BIM, TechDraw, FEM, Spreadsheet, Mesh and CAM.
 
-Both enforce:
+3. **`freecad_parametric_modeling_strategy`**  
+   Follow `Body → Sketch 2D → constraints → Pad/Pocket (and details)` workflow until final part. Includes hard parametric-correctness rules: sketch-on-face for face extension, External Geometry for constraints against existing solids, fully-constrained sketch before Pad/Pocket, never move a Pad (move its sketch), prefer Pattern over manual duplication, reference objects by internal name.
+
+4. **`drafting_2d_strategy`**  
+   Canonical Draft workflow when the deliverable is paper/DXF/SVG. Guidelines first, snapped final geometry on top, dimensions/text last. Never mix Draft and Sketcher for the same deliverable.
+
+5. **`fem_workflow_strategy`**  
+   Strict FEM order: capability gate → single fused solid → analysis → material → fixed support → load → mesh → solve. Surfaces typical root causes when results look wrong.
+
+All five enforce:
 - **Prefer structured text over images** to reduce token usage
 - **Recompute and validate** before declaring completion
 - **Do not export automatically** — only on explicit user request
