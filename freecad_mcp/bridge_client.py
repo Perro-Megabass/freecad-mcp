@@ -81,8 +81,9 @@ class BridgeClient:
                 line = self._file.readline()
             except (socket.timeout, OSError):
                 self._close()
-                # One retry after reconnect
+                # One retry after reconnect — regenerate id so logs distinguish attempts
                 self._connect()
+                req["id"] = str(uuid.uuid4())
                 try:
                     self._file.write(json.dumps(req) + "\n")
                     self._file.flush()

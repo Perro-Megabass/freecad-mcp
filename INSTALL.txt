@@ -147,8 +147,24 @@ Optional manual test (independent of Claude):
     cd <PROJECT_DIR>
     python test_bridge.py
 
-Expected output: [OK] lines for ping, list_documents,
-new_document, list_objects.
+Expected output (8/8 checks passed):
+    [PASS] ping
+    [PASS] get_capabilities
+    [PASS] new_document
+    [PASS] list_objects
+    [PASS] recompute
+    [PASS] get_scene_info
+    [PASS] bogus_action_error
+    [PASS] invalid_params_error
+    Summary: 8/8 checks passed
+
+Exit code: 0 (success), 1 (failures), 2 (cannot connect).
+
+IMPORTANT after updating the workbench files: copy the new
+FreeCADMCP/ contents into <USER_MOD_DIR>/FreeCADMCP/, remove
+<USER_MOD_DIR>/FreeCADMCP/__pycache__, then fully restart
+FreeCAD. A reconnect alone will not reload the Python modules
+that the FreeCAD process already imported.
 
 ----------------------------------------------------------------
 8. DAILY USE

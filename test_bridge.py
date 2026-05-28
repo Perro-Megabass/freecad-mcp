@@ -127,6 +127,15 @@ def main():
             _assert(not resp["ok"], "bogus_action should fail")
             _assert((resp["error"] or {}).get("code") == "INVALID_PARAMS", "unexpected error code")
 
+        def t_invalid_params_error():
+            # set_active_document without 'name' should map to INVALID_PARAMS, not FREECAD_ERROR
+            resp = call(f, "set_active_document", {})
+            _assert_envelope(resp)
+            _assert(not resp["ok"], "set_active_document without name should fail")
+            code = (resp["error"] or {}).get("code")
+            _assert(code == "INVALID_PARAMS",
+                    f"expected INVALID_PARAMS, got {code}")
+
         run_check("ping", t_ping)
         run_check("get_capabilities", t_capabilities)
         run_check("new_document", t_new_document)
@@ -134,6 +143,7 @@ def main():
         run_check("recompute", t_recompute)
         run_check("get_scene_info", t_scene_info)
         run_check("bogus_action_error", t_unknown_action_error)
+        run_check("invalid_params_error", t_invalid_params_error)
     finally:
         f.close()
         s.close()

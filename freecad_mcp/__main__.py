@@ -62,7 +62,10 @@ def _normalize_envelope(resp) -> dict:
         return {"ok": True, "result": resp.get("result")}
     err = resp.get("error")
     if isinstance(err, dict) and err.get("code") and err.get("message"):
-        return {"ok": False, "error": {"code": err["code"], "message": err["message"]}}
+        err_out = {"code": err["code"], "message": err["message"]}
+        if "details" in err:
+            err_out["details"] = err["details"]
+        return {"ok": False, "error": err_out}
     return _error_envelope("FREECAD_ERROR", "Bridge returned an error without details")
 
 
@@ -522,7 +525,7 @@ def freecad_pocket(body: str, sketch: str, length: float = 10.0,
 def freecad_linear_array(source: str, count: int = 2,
                          dx: float = 10.0, dy: float = 0.0, dz: float = 0.0,
                          name: str | None = None, document: str | None = None) -> str:
-    """Linear pattern of copies along XYZ delta."""
+    """Linear pattern along XYZ delta. 'count' includes the original; generates count-1 duplicates."""
     p = {"source": source, "count": count, "dx": dx, "dy": dy, "dz": dz}
     if name: p["name"] = name
     if document: p["document"] = document
@@ -534,7 +537,8 @@ def freecad_polar_array(source: str, count: int = 4, total_angle_deg: float = 36
                         axis_x: float = 0, axis_y: float = 0, axis_z: float = 1,
                         cx: float = 0, cy: float = 0, cz: float = 0,
                         name: str | None = None, document: str | None = None) -> str:
-    """Polar pattern of copies around an axis."""
+    """Polar pattern around an axis. 'count' includes the original; generates count-1 duplicates.
+    For total_angle=360°, step = total/count. For partial angles, step = total/(count-1)."""
     p = {"source": source, "count": count, "total_angle_deg": total_angle_deg,
          "axis": {"x": axis_x, "y": axis_y, "z": axis_z},
          "center": {"x": cx, "y": cy, "z": cz}}

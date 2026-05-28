@@ -9,7 +9,31 @@ Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp).
 
 ## Version
 
-**Current:** 1.2.0 | **Target FreeCAD:** 1.0.2
+**Current:** 1.2.1 | **Target FreeCAD:** 1.0.2
+
+### What's New in 1.2.1 — Bug-fix round
+
+Full audit: 18 bugs identified and corrected across handlers, server, MCP envelope and smoke tests. Validated live against FreeCAD 1.0.2 — smoke test 8/8.
+
+User / agent-visible changes:
+
+- ✅ **Coherent error classification** — `ValueError`/`KeyError` from handlers now return `INVALID_PARAMS` (previously fell through to an opaque `FREECAD_ERROR`).
+- ✅ **`freecad_import_file` actually supports STL** — used to advertise STL but `Part.insert` rejected it; now dispatches by extension to `Mesh.insert`.
+- ✅ **`freecad_polar_array` fixed** — removed dead conditional and div-by-zero with `count=0`; semantics clarified (`360°` → `total/count`; partial → `total/(count-1)`).
+- ✅ **`freecad_fem_add_force` applies direction** — the `direction` parameter is no longer silently dropped; assigned to `DirectionVector` when the build exposes it.
+- ✅ **`freecad_duplicate` validates `Shape`** — clear error when trying to duplicate sketches/spreadsheets.
+- ✅ **`freecad_gui_screenshot` validates active GUI** — informative `LookupError` in headless mode.
+- ✅ **`freecad_fillet` / `freecad_chamfer`** — validate edge index range (1..N) before calling FreeCAD.
+- ✅ **`freecad_set_property`** — accepts `{x,y,z}` dicts in addition to primitives.
+- ✅ **`freecad_create_sketch` XZ plane** — orientation fixed (rotation −90° around X).
+- ✅ **`freecad_export` / `freecad_export_stl`** — validate that the destination directory exists.
+- ✅ **Bridge envelope** — `error.details.trace` from the backend is now preserved through to the MCP client.
+- ✅ **More robust server** — `listen(8)` instead of `listen(1)`, `stop()` joins the thread.
+- ✅ **Smoke test** extended with `invalid_params_error` (8 checks instead of 7).
+- ✅ **Array docstrings** clarify that `count` includes the original (`count-1` duplicates generated).
+- ✅ **FEM init** without the dead `from femtools import ccxtools` import.
+- ✅ **`_get_obj(None)`** now produces `INVALID_PARAMS: Missing 'name'`.
+- ✅ **`bridge_client` retry** regenerates UUID so logs can distinguish attempts.
 
 ### What's New in 1.2.0
 
@@ -261,6 +285,7 @@ This smoke test validates:
 | `recompute` | Parametric model updates and stable response envelope |
 | `get_scene_info` | Rich textual scene snapshot (preferred tool) |
 | `bogus_action_error` | Error envelope and code taxonomy (expects `INVALID_PARAMS`) |
+| `invalid_params_error` | Missing-parameter dispatch maps to `INVALID_PARAMS` (not `FREECAD_ERROR`) |
 
 Expected output:
 
@@ -272,8 +297,9 @@ Expected output:
 [PASS] recompute
 [PASS] get_scene_info
 [PASS] bogus_action_error
+[PASS] invalid_params_error
 
-Summary: 7/7 checks passed
+Summary: 8/8 checks passed
 ```
 
 Exit code: `0` (success) or `1` (failures) or `2` (connection error).

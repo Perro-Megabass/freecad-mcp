@@ -378,6 +378,9 @@ def h_export(params):
     path = params.get("path")
     if not path:
         raise ValueError("Missing 'path'")
+    parent = os.path.dirname(path) or "."
+    if not os.path.isdir(parent):
+        raise ValueError(f"Output directory does not exist: {parent}")
     obj_names = params.get("objects") or []
     if obj_names:
         objs = [doc.getObject(n) for n in obj_names]
@@ -403,6 +406,8 @@ def h_delete_object(params):
 
 
 def _get_obj(doc, name):
+    if not name:
+        raise ValueError("Missing 'name'")
     o = doc.getObject(name)
     if o is None:
         raise LookupError(f"Object not found: {name}")
@@ -554,11 +559,14 @@ def h_fillet(params):
     name = params.get("name", "Fillet")
     obj = doc.addObject("Part::Fillet", name)
     obj.Base = src
-    edges = []
+    total = len(src.Shape.Edges)
     if params.get("edges"):
+        bad = [i for i in params["edges"] if not (1 <= int(i) <= total)]
+        if bad:
+            raise ValueError(f"Edge indices out of range 1..{total}: {bad}")
         edges = [(int(i), radius, radius) for i in params["edges"]]
     else:
-        edges = [(i + 1, radius, radius) for i in range(len(src.Shape.Edges))]
+        edges = [(i + 1, radius, radius) for i in range(total)]
     obj.Edges = edges
     doc.recompute()
     return {"document": doc.Name, "object": _obj_info(obj)}
@@ -572,10 +580,14 @@ def h_chamfer(params):
     name = params.get("name", "Chamfer")
     obj = doc.addObject("Part::Chamfer", name)
     obj.Base = src
+    total = len(src.Shape.Edges)
     if params.get("edges"):
+        bad = [i for i in params["edges"] if not (1 <= int(i) <= total)]
+        if bad:
+            raise ValueError(f"Edge indices out of range 1..{total}: {bad}")
         edges = [(int(i), size, size) for i in params["edges"]]
     else:
-        edges = [(i + 1, size, size) for i in range(len(src.Shape.Edges))]
+        edges = [(i + 1, size, size) for i in range(total)]
     obj.Edges = edges
     doc.recompute()
     return {"document": doc.Name, "object": _obj_info(obj)}
@@ -625,6 +637,8 @@ def h_set_property(params):
     value = params["value"]
     if not hasattr(obj, prop):
         raise LookupError(f"Property not found: {prop}")
+    if isinstance(value, dict) and {"x", "y", "z"} <= set(value):
+        value = _vec(value)
     setattr(obj, prop, value)
     doc.recompute()
     return {"document": doc.Name, "object": _obj_info(obj), "property": prop}
@@ -653,6 +667,8 @@ def h_duplicate(params):
     params = params or {}
     doc = _get_doc(params)
     src = _get_obj(doc, params["name"])
+    if not hasattr(src, "Shape") or src.Shape is None:
+        raise ValueError(f"Object '{src.Name}' has no Shape and cannot be duplicated this way")
     new_name = params.get("new_name", src.Name + "_copy")
     obj = doc.addObject("Part::Feature", new_name)
     obj.Shape = src.Shape.copy()
@@ -668,7 +684,12 @@ def h_import_file(params):
     if not path or not os.path.isfile(path):
         raise LookupError(f"File not found: {path}")
     before = set(o.Name for o in doc.Objects)
-    Part.insert(path, doc.Name)
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".stl":
+        import Mesh
+        Mesh.insert(path, doc.Name)
+    else:
+        Part.insert(path, doc.Name)
     imported = [_obj_info(o) for o in doc.Objects if o.Name not in before]
     return {"document": doc.Name, "imported": imported}
 
@@ -707,7 +728,7 @@ def h_create_sketch(params):
     plane = params.get("plane", "XY").upper()
     rotations = {
         "XY": App.Rotation(0, 0, 0, 1),
-        "XZ": App.Rotation(App.Vector(1, 0, 0), 90),
+        "XZ": App.Rotation(App.Vector(1, 0, 0), -90),
         "YZ": App.Rotation(App.Vector(0, 1, 0), 90),
     }
     if plane not in rotations:
@@ -851,7 +872,7 @@ def h_pocket(params):
 # ==================== ARRAYS ====================
 
 def h_linear_array(params):
-    """Linear pattern of N copies along XYZ delta."""
+    """Linear pattern along XYZ delta. 'count' includes the original; generates count-1 duplicates."""
     params = params or {}
     doc = _get_doc(params)
     src = _get_obj(doc, params["source"])
@@ -873,7 +894,8 @@ def h_linear_array(params):
 
 
 def h_polar_array(params):
-    """Polar pattern of N copies around an axis."""
+    """Polar pattern around an axis. 'count' includes the original; generates count-1 duplicates.
+    For total_angle=360°, step = total/count. For partial angles, step = total/(count-1)."""
     params = params or {}
     doc = _get_doc(params)
     src = _get_obj(doc, params["source"])
@@ -882,7 +904,14 @@ def h_polar_array(params):
     axis = _vec(params.get("axis", {"x": 0, "y": 0, "z": 1}))
     center = _vec(params.get("center", {"x": 0, "y": 0, "z": 0}))
     base_name = params.get("name", src.Name + "_parr")
-    step = total_angle / count if total_angle != 360.0 else total_angle / count
+    if count < 1:
+        raise ValueError("count must be >= 1")
+    # 360° → repartir entre 'count' copias (sin duplicar el origen al cerrar)
+    # parcial → repartir entre count-1 intervalos
+    if abs(total_angle - 360.0) < 1e-9:
+        step = total_angle / count
+    else:
+        step = total_angle / max(count - 1, 1)
     created = []
     for i in range(1, count):
         new = doc.addObject("Part::Feature", f"{base_name}_{i}")
@@ -915,7 +944,10 @@ def h_gui_screenshot(params):
         using_temp = True
 
     try:
-        Gui.ActiveDocument.ActiveView.saveImage(path, w, h, "Current")
+        gui_doc = Gui.ActiveDocument
+        if gui_doc is None or gui_doc.ActiveView is None:
+            raise LookupError("No active GUI view; open a document in FreeCAD GUI first.")
+        gui_doc.ActiveView.saveImage(path, w, h, "Current")
         with open(path, "rb") as f:
             image_bytes = f.read()
         result = {
@@ -1030,6 +1062,9 @@ def h_export_stl(params):
     path = params.get("path")
     if not path:
         raise ValueError("Missing 'path'")
+    parent = os.path.dirname(path) or "."
+    if not os.path.isdir(parent):
+        raise ValueError(f"Output directory does not exist: {parent}")
     names = params.get("objects") or []
     objs = [_get_obj(doc, n) for n in names] if names else list(doc.Objects)
     Mesh.export(objs, path)
@@ -1130,7 +1165,6 @@ def h_assembly_attach(params):
 # ==================== FEM ====================
 
 def h_fem_create_analysis(params):
-    from femtools import ccxtools  # noqa: F401
     import ObjectsFem
     params = params or {}
     doc = _get_doc(params)
@@ -1180,14 +1214,20 @@ def h_fem_add_force(params):
     c = ObjectsFem.makeConstraintForce(doc, params.get("name", "Force"))
     c.Force = float(params.get("force", 1.0))
     d = _vec(params.get("direction", {"x": 0, "y": 0, "z": -1}))
-    # Assigning direction requires a geometric reference; magnitude only here.
     if params.get("references"):
         src = _get_obj(doc, params["references"]["object"])
         faces = params["references"].get("faces", [])
         c.References = [(src, tuple(f"Face{i}" for i in faces))]
+    # Apply direction if the build exposes DirectionVector (FreeCAD >= 0.20).
+    try:
+        if hasattr(c, "DirectionVector"):
+            c.DirectionVector = d
+    except Exception:
+        pass
     analysis.addObject(c)
     doc.recompute()
-    return {"document": doc.Name, "constraint": c.Name, "force": c.Force}
+    return {"document": doc.Name, "constraint": c.Name, "force": c.Force,
+            "direction": {"x": d.x, "y": d.y, "z": d.z}}
 
 
 # ==================== CAM / PATH ====================

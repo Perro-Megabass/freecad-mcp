@@ -94,6 +94,12 @@ class BridgeServer:
         except LookupError as e:
             return {"id": req_id, "ok": False,
                     "error": {"code": "NOT_FOUND", "message": str(e)}}
+        except ValueError as e:
+            return {"id": req_id, "ok": False,
+                    "error": {"code": "INVALID_PARAMS", "message": str(e)}}
+        except KeyError as e:
+            return {"id": req_id, "ok": False,
+                    "error": {"code": "INVALID_PARAMS", "message": f"Missing parameter: {e}"}}
         except Exception as e:
             return {"id": req_id, "ok": False,
                     "error": {"code": "FREECAD_ERROR", "message": str(e),
@@ -144,7 +150,7 @@ class BridgeServer:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.bind((HOST, PORT))
-            self._sock.listen(1)
+            self._sock.listen(8)
             self._sock.settimeout(1.0)
         except Exception as e:
             App.Console.PrintError(f"[MCP] Bind error: {e}\n")
@@ -185,4 +191,7 @@ class BridgeServer:
                 self._sock.close()
         except Exception:
             pass
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
         return True
