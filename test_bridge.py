@@ -136,6 +136,34 @@ def main():
             _assert(code == "INVALID_PARAMS",
                     f"expected INVALID_PARAMS, got {code}")
 
+        def t_distance_pairing_error():
+            # get_distance with only name1 must fail cleanly, not return 0.
+            resp = call(f, "get_distance", {"name1": "Whatever", "document": doc_name})
+            _assert_envelope(resp)
+            _assert(not resp["ok"], "get_distance with one name should fail")
+            code = (resp["error"] or {}).get("code")
+            _assert(code == "INVALID_PARAMS", f"expected INVALID_PARAMS, got {code}")
+
+        def t_polygon_sides_error():
+            resp = call(f, "create_polygon_prism", {"sides": 2, "document": doc_name})
+            _assert_envelope(resp)
+            _assert(not resp["ok"], "sides=2 should fail")
+            code = (resp["error"] or {}).get("code")
+            _assert(code == "INVALID_PARAMS", f"expected INVALID_PARAMS, got {code}")
+
+        def t_shape_guard():
+            # Measuring a sketch (no Shape volume) must return INVALID_PARAMS,
+            # not FREECAD_ERROR with a raw traceback.
+            resp = call(f, "create_sketch", {"name": "SmokeSketch", "document": doc_name})
+            _assert_envelope(resp)
+            _assert(resp["ok"], "create_sketch should succeed")
+            sk_name = resp["result"]["object"]["name"]
+            resp = call(f, "fillet", {"source": sk_name, "document": doc_name})
+            _assert_envelope(resp)
+            _assert(not resp["ok"], "fillet on sketch should fail")
+            code = (resp["error"] or {}).get("code")
+            _assert(code == "INVALID_PARAMS", f"expected INVALID_PARAMS, got {code}")
+
         run_check("ping", t_ping)
         run_check("get_capabilities", t_capabilities)
         run_check("new_document", t_new_document)
@@ -144,6 +172,9 @@ def main():
         run_check("get_scene_info", t_scene_info)
         run_check("bogus_action_error", t_unknown_action_error)
         run_check("invalid_params_error", t_invalid_params_error)
+        run_check("distance_pairing_error", t_distance_pairing_error)
+        run_check("polygon_sides_error", t_polygon_sides_error)
+        run_check("shape_guard", t_shape_guard)
     finally:
         f.close()
         s.close()

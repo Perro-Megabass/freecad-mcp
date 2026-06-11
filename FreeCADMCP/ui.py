@@ -8,7 +8,8 @@
 
 from PySide2 import QtCore, QtWidgets
 
-from server import BridgeServer, _pump_main_queue
+import handlers
+from server import BridgeServer, _ensure_pump_timer
 
 
 class MCPDock(QtWidgets.QDockWidget):
@@ -29,10 +30,15 @@ class MCPDock(QtWidgets.QDockWidget):
         self.btn_connect.clicked.connect(self.on_connect)
         self.btn_disconnect.clicked.connect(self.on_disconnect)
 
+        self.chk_run_python = QtWidgets.QCheckBox("Allow run_python (arbitrary code)")
+        self.chk_run_python.setChecked(handlers.ALLOW_RUN_PYTHON)
+        self.chk_run_python.toggled.connect(self.on_toggle_run_python)
+
         layout.addWidget(QtWidgets.QLabel("Status:"))
         layout.addWidget(self.status_label)
         layout.addWidget(self.btn_connect)
         layout.addWidget(self.btn_disconnect)
+        layout.addWidget(self.chk_run_python)
         layout.addStretch(1)
 
         self.setWidget(w)
@@ -42,11 +48,12 @@ class MCPDock(QtWidgets.QDockWidget):
         self._timer.timeout.connect(self.refresh)
         self._timer.start()
 
-        # Pump main-thread queue (runs handlers on the GUI thread)
-        self._pump_timer = QtCore.QTimer(self)
-        self._pump_timer.setInterval(50)
-        self._pump_timer.timeout.connect(_pump_main_queue)
-        self._pump_timer.start()
+        # The main-thread pump timer is owned by the server module so it
+        # survives this dock being closed; ensure it exists anyway.
+        _ensure_pump_timer()
+
+    def on_toggle_run_python(self, checked):
+        handlers.ALLOW_RUN_PYTHON = bool(checked)
 
     def on_connect(self):
         srv = BridgeServer.instance()

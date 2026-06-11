@@ -410,7 +410,10 @@ def freecad_import_file(path: str, document: str | None = None) -> str:
 
 @mcp.tool()
 def freecad_run_python(code: str) -> str:
-    """Execute arbitrary Python code with App/Part/Gui/doc in scope. Requires FREECAD_ALLOW_RUN_PYTHON=true."""
+    """Execute arbitrary Python code with App/Part/Gui/doc in scope.
+
+    Requires FREECAD_ALLOW_RUN_PYTHON=true in the Claude Desktop config AND
+    the 'Allow run_python' checkbox enabled in the FreeCAD MCP Bridge dock."""
     # MCP-side gate: the env var lives in the MCP server process (set by
     # Claude Desktop config), not necessarily in the FreeCAD process. Check
     # here so the user sees a clear error without needing FreeCAD to read it.
@@ -608,6 +611,11 @@ def freecad_gui_screenshot(width: int = 1280, height: int = 720, path: str | Non
                 image_bytes = f.read()
         _log_tool_event("gui_screenshot", True, (time.perf_counter() - start) * 1000.0)
         return Image(data=image_bytes, format="png")
+    except Exception as e:
+        _log_tool_event("gui_screenshot", False, (time.perf_counter() - start) * 1000.0, str(e))
+        return json.dumps(_error_envelope(
+            "FREECAD_ERROR", f"Screenshot succeeded but image could not be read: {e}"
+        ), ensure_ascii=False)
     finally:
         if not keep_file:
             try:
@@ -660,6 +668,12 @@ def freecad_get_distance(name1: str | None = None, name2: str | None = None,
                          bx: float = 0, by: float = 0, bz: float = 0,
                          document: str | None = None) -> str:
     """Distance between 2 objects (by name) or 2 points (a/b)."""
+    if bool(name1) != bool(name2):
+        return json.dumps(_error_envelope(
+            "INVALID_PARAMS",
+            "Provide BOTH name1 and name2 for object distance, or neither "
+            "(with a/b point coordinates) for point distance."
+        ), ensure_ascii=False)
     if name1 and name2:
         p = {"name1": name1, "name2": name2}
     else:

@@ -9,7 +9,20 @@ Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp).
 
 ## Version
 
-**Current:** 1.2.1 | **Target FreeCAD:** 1.0.2
+**Current:** 1.2.2 | **Target FreeCAD:** 1.0.2
+
+### What's New in 1.2.2 — Audit round 2
+
+14 fixes from a second full audit. Validated live against FreeCAD 1.0.2 — smoke test **11/11** (3 new checks). Highlights:
+
+- ✅ **No more double execution** — the bridge client no longer resends a request after a read timeout; slow operations (large booleans, meshing) could previously run twice.
+- ✅ **No more ghost tasks** — a main-thread dispatch timeout now cancels the queued task instead of letting it mutate the document later.
+- ✅ **`run_python` gated in FreeCAD itself** — new **"Allow run_python"** checkbox in the workbench dock; the port can no longer be used to execute arbitrary code while the option is off.
+- ✅ **Handlers survive the dock closing** — the main-thread pump timer is owned by the server, not the UI.
+- ✅ **Clean `Shape` guards everywhere** — fillet/chamfer/arrays/measurements on sketches or spreadsheets now return `INVALID_PARAMS` instead of raw tracebacks; failed fillets/chamfers are rolled back instead of leaving broken objects.
+- ✅ **Sketch plane orientation corrected** — XZ back to +90° about X (1.2.1 had inverted it), YZ uses FreeCAD's origin-plane quaternion.
+- ✅ **`fem_add_force` reports honestly** — response includes `direction_applied` (FreeCAD 1.0 cannot take a raw vector direction).
+- ✅ Misc: `get_distance` name pairing validated, `sides >= 3` for polygon prisms, `save_document` path validation, screenshot error envelope, `geo_index` required for constraints.
 
 ### What's New in 1.2.1 — Bug-fix round
 
@@ -313,7 +326,7 @@ Exit code: `0` (success) or `1` (failures) or `2` (connection error).
 | `FREECAD_HOST` | `127.0.0.1` | Bridge host |
 | `FREECAD_PORT` | `9877` | Bridge port |
 | `FREECAD_TIMEOUT_SEC` | `60` | Per-call timeout (seconds) |
-| `FREECAD_ALLOW_RUN_PYTHON` | `false` | Enable `freecad_run_python` tool |
+| `FREECAD_ALLOW_RUN_PYTHON` | `false` | Enable `freecad_run_python` tool (MCP side; FreeCAD side also requires the **Allow run_python** dock checkbox) |
 | `FREECAD_MCP_TELEMETRY` | `true` | Enable lightweight per-tool telemetry |
 | `FREECAD_MCP_TELEMETRY_PATH` | system temp | JSONL telemetry output path |
 
@@ -370,7 +383,7 @@ Bridge and client errors use **stable, actionable codes**. When something fails,
 → Set `FREECAD_PORT` to a free port and edit `PORT = 9877` in `FreeCADMCP/server.py`.
 
 **`run_python disabled`**  
-→ Add `"FREECAD_ALLOW_RUN_PYTHON": "true"` to the `env` section in Claude Desktop config.
+→ Two gates must both be open: add `"FREECAD_ALLOW_RUN_PYTHON": "true"` to the `env` section in Claude Desktop config, **and** enable the **Allow run_python** checkbox in the FreeCAD MCP Bridge dock (or launch FreeCAD with the same env var set).
 
 **Workbench not visible in FreeCAD**  
 → Confirm `FreeCADMCP/` folder was copied to the correct Mod directory and restart FreeCAD.

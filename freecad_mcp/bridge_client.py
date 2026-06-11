@@ -72,29 +72,50 @@ class BridgeClient:
 
     def call(self, action, params=None):
         with self._lock:
-            if self._sock is None:
+            fresh = self._sock is None
+            if fresh:
                 self._connect()
             req = {"id": str(uuid.uuid4()), "action": action, "params": params or {}}
+            # Write phase. A stale connection (server restarted) typically
+            # fails here; retrying is safe because the request was not
+            # processed. Only retry when the connection was being reused.
             try:
                 self._file.write(json.dumps(req) + "\n")
                 self._file.flush()
-                line = self._file.readline()
             except (socket.timeout, OSError):
                 self._close()
-                # One retry after reconnect — regenerate id so logs distinguish attempts
+                if fresh:
+                    raise BridgeClientError(
+                        "BRIDGE_IO_TIMEOUT",
+                        "IO error while sending request to FreeCAD bridge. "
+                        "Verify FreeCAD is responsive and retry.",
+                    )
                 self._connect()
-                req["id"] = str(uuid.uuid4())
+                req["id"] = str(uuid.uuid4())  # distinguish attempts in logs
                 try:
                     self._file.write(json.dumps(req) + "\n")
                     self._file.flush()
-                    line = self._file.readline()
                 except (socket.timeout, OSError):
                     self._close()
                     raise BridgeClientError(
                         "BRIDGE_IO_TIMEOUT",
-                        "Timeout/IO error while talking to FreeCAD bridge. "
+                        "IO error while sending request to FreeCAD bridge. "
                         "Verify FreeCAD is responsive and retry.",
                     )
+            # Read phase. NEVER retry here: the request may already be
+            # executing in FreeCAD, and resending it would run the action
+            # twice (duplicate objects, double cuts, etc.).
+            try:
+                line = self._file.readline()
+            except (socket.timeout, OSError):
+                self._close()
+                raise BridgeClientError(
+                    "BRIDGE_IO_TIMEOUT",
+                    "Timeout waiting for FreeCAD's response. The action may "
+                    "still complete inside FreeCAD — inspect the scene "
+                    "(freecad_get_scene_info) before retrying to avoid "
+                    "duplicate operations.",
+                )
             if not line:
                 self._close()
                 raise BridgeClientError(

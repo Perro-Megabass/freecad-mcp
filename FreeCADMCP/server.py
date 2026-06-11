@@ -19,32 +19,72 @@ from handlers import HANDLERS
 # Task queue for execution on FreeCAD's main (GUI) thread.
 _main_queue = queue.Queue()
 
+# Pump timer owned by the server (not the dock UI), so handlers keep running
+# even if the dock widget is closed or destroyed.
+_pump_timer = None
+
 
 def _pump_main_queue():
     """Called by QTimer on the GUI thread. Drains pending tasks."""
     try:
         while True:
-            fn, args, result_holder, event = _main_queue.get_nowait()
+            task = _main_queue.get_nowait()
+            with task["lock"]:
+                if task["cancelled"]:
+                    continue
+                task["started"] = True
             try:
-                result_holder["value"] = fn(*args)
+                task["holder"]["value"] = task["fn"](*task["args"])
             except Exception as e:
-                result_holder["error"] = e
+                task["holder"]["error"] = e
             finally:
-                event.set()
+                task["event"].set()
     except queue.Empty:
         pass
 
 
+def _ensure_pump_timer():
+    """Create the GUI-thread pump timer once. Must be called from the GUI thread."""
+    global _pump_timer
+    if _pump_timer is not None:
+        return
+    try:
+        from PySide2 import QtCore
+        _pump_timer = QtCore.QTimer()
+        _pump_timer.setInterval(50)
+        _pump_timer.timeout.connect(_pump_main_queue)
+        _pump_timer.start()
+    except Exception as e:
+        App.Console.PrintError(f"[MCP] Could not start pump timer: {e}\n")
+
+
 def run_on_main(fn, *args, timeout=30.0):
-    """Dispatch fn to the GUI thread and wait for the result."""
-    result_holder = {}
-    event = threading.Event()
-    _main_queue.put((fn, args, result_holder, event))
-    if not event.wait(timeout):
-        raise TimeoutError("Main-thread dispatch timeout")
-    if "error" in result_holder:
-        raise result_holder["error"]
-    return result_holder.get("value")
+    """Dispatch fn to the GUI thread and wait for the result.
+
+    On timeout the task is cancelled so it cannot execute later as a ghost
+    mutation after the client already received an error.
+    """
+    task = {
+        "fn": fn,
+        "args": args,
+        "holder": {},
+        "event": threading.Event(),
+        "lock": threading.Lock(),
+        "cancelled": False,
+        "started": False,
+    }
+    _main_queue.put(task)
+    if not task["event"].wait(timeout):
+        with task["lock"]:
+            if not task["started"]:
+                task["cancelled"] = True
+                raise TimeoutError("Main-thread dispatch timeout (task cancelled)")
+        # Task already started on the GUI thread; give it a short grace period.
+        if not task["event"].wait(timeout):
+            raise TimeoutError("Main-thread dispatch timeout (task still running)")
+    if "error" in task["holder"]:
+        raise task["holder"]["error"]
+    return task["holder"].get("value")
 
 
 HOST = "127.0.0.1"
@@ -177,6 +217,7 @@ class BridgeServer:
     def start(self):
         if self._running:
             return False
+        _ensure_pump_timer()
         self._running = True
         self._thread = threading.Thread(target=self._server_loop, daemon=True)
         self._thread.start()

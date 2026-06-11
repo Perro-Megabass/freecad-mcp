@@ -11,6 +11,14 @@ import os
 import FreeCAD as App
 import Part
 
+# Bridge-side gate for run_python. The MCP server enforces its own env-var
+# gate, but anything can connect to the local port directly, so the handler
+# must enforce it too. Toggled from the workbench dock (ui.py) or pre-set via
+# env var when FreeCAD is launched from a shell.
+ALLOW_RUN_PYTHON = (
+    os.environ.get("FREECAD_ALLOW_RUN_PYTHON", "false").strip().lower() == "true"
+)
+
 
 def _get_doc(params):
     name = (params or {}).get("document")
@@ -293,6 +301,9 @@ def h_save_document(params):
     doc = _get_doc(params)
     path = params.get("path")
     if path:
+        parent = os.path.dirname(path) or "."
+        if not os.path.isdir(parent):
+            raise ValueError(f"Output directory does not exist: {parent}")
         doc.saveAs(path)
     else:
         doc.save()
@@ -414,6 +425,18 @@ def _get_obj(doc, name):
     return o
 
 
+def _get_shape(obj):
+    """Return obj.Shape or raise a clean INVALID_PARAMS-mapped error.
+
+    Sketches, spreadsheets, FEM objects, etc. have no usable Shape.
+    """
+    shp = getattr(obj, "Shape", None)
+    if shp is None or shp.isNull():
+        raise ValueError(
+            f"Object '{obj.Name}' ({obj.TypeId}) has no usable Shape for this operation")
+    return shp
+
+
 def _vec(d):
     return App.Vector(float(d.get("x", 0)), float(d.get("y", 0)), float(d.get("z", 0)))
 
@@ -464,6 +487,8 @@ def h_create_polygon_prism(params):
     params = params or {}
     doc = _get_doc(params)
     sides = int(params.get("sides", 6))
+    if sides < 3:
+        raise ValueError(f"'sides' must be >= 3, got: {sides}")
     radius = float(params.get("radius", 5.0))  # circunscrito
     height = float(params.get("height", 5.0))
     name = params.get("name", "Prism")
@@ -557,9 +582,7 @@ def h_fillet(params):
     src = _get_obj(doc, params["source"])
     radius = float(params.get("radius", 1.0))
     name = params.get("name", "Fillet")
-    obj = doc.addObject("Part::Fillet", name)
-    obj.Base = src
-    total = len(src.Shape.Edges)
+    total = len(_get_shape(src).Edges)
     if params.get("edges"):
         bad = [i for i in params["edges"] if not (1 <= int(i) <= total)]
         if bad:
@@ -567,8 +590,16 @@ def h_fillet(params):
         edges = [(int(i), radius, radius) for i in params["edges"]]
     else:
         edges = [(i + 1, radius, radius) for i in range(total)]
+    obj = doc.addObject("Part::Fillet", name)
+    obj.Base = src
     obj.Edges = edges
     doc.recompute()
+    if not obj.isValid() or obj.Shape.isNull():
+        doc.removeObject(obj.Name)
+        doc.recompute()
+        raise ValueError(
+            f"Fillet failed (radius {radius} too large for the selected edges?); "
+            "no object was left in the document")
     return {"document": doc.Name, "object": _obj_info(obj)}
 
 
@@ -578,9 +609,7 @@ def h_chamfer(params):
     src = _get_obj(doc, params["source"])
     size = float(params.get("size", 1.0))
     name = params.get("name", "Chamfer")
-    obj = doc.addObject("Part::Chamfer", name)
-    obj.Base = src
-    total = len(src.Shape.Edges)
+    total = len(_get_shape(src).Edges)
     if params.get("edges"):
         bad = [i for i in params["edges"] if not (1 <= int(i) <= total)]
         if bad:
@@ -588,8 +617,16 @@ def h_chamfer(params):
         edges = [(int(i), size, size) for i in params["edges"]]
     else:
         edges = [(i + 1, size, size) for i in range(total)]
+    obj = doc.addObject("Part::Chamfer", name)
+    obj.Base = src
     obj.Edges = edges
     doc.recompute()
+    if not obj.isValid() or obj.Shape.isNull():
+        doc.removeObject(obj.Name)
+        doc.recompute()
+        raise ValueError(
+            f"Chamfer failed (size {size} too large for the selected edges?); "
+            "no object was left in the document")
     return {"document": doc.Name, "object": _obj_info(obj)}
 
 
@@ -681,7 +718,9 @@ def h_import_file(params):
     params = params or {}
     doc = _get_doc(params)
     path = params.get("path")
-    if not path or not os.path.isfile(path):
+    if not path:
+        raise ValueError("Missing 'path'")
+    if not os.path.isfile(path):
         raise LookupError(f"File not found: {path}")
     before = set(o.Name for o in doc.Objects)
     ext = os.path.splitext(path)[1].lower()
@@ -697,14 +736,16 @@ def h_import_file(params):
 def h_run_python(params):
     """Execute arbitrary Python in FreeCAD context.
 
-    Note: the user-facing opt-in (FREECAD_ALLOW_RUN_PYTHON=true) is enforced
-    on the MCP server side (freecad_mcp/__main__.py), because Claude Desktop
-    injects env vars into the MCP server process, not into the FreeCAD
-    process. Checking the env var here would always fail unless the user
-    launched FreeCAD from a shell with the env var pre-set, which is not the
-    documented setup. The bridge already binds to 127.0.0.1 only, so the
-    trust boundary is the local machine.
+    Gated on the bridge side too (ALLOW_RUN_PYTHON), because any local
+    process can connect to the port directly, bypassing the MCP-side env-var
+    check. Enable via the 'Allow run_python' checkbox in the workbench dock,
+    or by launching FreeCAD with FREECAD_ALLOW_RUN_PYTHON=true.
     """
+    if not ALLOW_RUN_PYTHON:
+        raise ValueError(
+            "run_python is disabled in FreeCAD. Enable the 'Allow run_python' "
+            "checkbox in the MCP Bridge dock (or launch FreeCAD with "
+            "FREECAD_ALLOW_RUN_PYTHON=true).")
     code = (params or {}).get("code")
     if not code:
         raise ValueError("Missing 'code'")
@@ -726,10 +767,14 @@ def h_create_sketch(params):
     doc = _get_doc(params)
     name = params.get("name", "Sketch")
     plane = params.get("plane", "XY").upper()
+    # FreeCAD origin-plane conventions:
+    #   XZ: +90° about X — sketch normal -Y, sketch Y maps to global +Z.
+    #   YZ: 120° about (1,1,1) (quaternion 0.5,0.5,0.5,0.5) — sketch X maps to
+    #       global +Y, sketch Y to +Z, normal +X.
     rotations = {
         "XY": App.Rotation(0, 0, 0, 1),
-        "XZ": App.Rotation(App.Vector(1, 0, 0), -90),
-        "YZ": App.Rotation(App.Vector(0, 1, 0), 90),
+        "XZ": App.Rotation(App.Vector(1, 0, 0), 90),
+        "YZ": App.Rotation(0.5, 0.5, 0.5, 0.5),
     }
     if plane not in rotations:
         raise ValueError(f"plane must be XY|XZ|YZ, got: {plane}")
@@ -808,6 +853,9 @@ def h_sketch_add_constraint(params):
     sk = _get_obj(doc, params["sketch"])
     ctype = params["type"].lower()
     geo = int(params.get("geo_index", -1))
+    if geo < 0:
+        raise ValueError("Missing or invalid 'geo_index' (must be >= 0; "
+                         "use the geometry_index returned when adding geometry)")
     if ctype == "horizontal":
         idx = sk.addConstraint(Sketcher.Constraint("Horizontal", geo))
     elif ctype == "vertical":
@@ -880,11 +928,12 @@ def h_linear_array(params):
     dx = float(params.get("dx", 10.0))
     dy = float(params.get("dy", 0.0))
     dz = float(params.get("dz", 0.0))
+    src_shape = _get_shape(src)
     created = []
     base_name = params.get("name", src.Name + "_arr")
     for i in range(1, count):
         new = doc.addObject("Part::Feature", f"{base_name}_{i}")
-        new.Shape = src.Shape.copy()
+        new.Shape = src_shape.copy()
         p = src.Placement
         new.Placement = App.Placement(
             p.Base + App.Vector(dx * i, dy * i, dz * i), p.Rotation)
@@ -912,10 +961,11 @@ def h_polar_array(params):
         step = total_angle / count
     else:
         step = total_angle / max(count - 1, 1)
+    src_shape = _get_shape(src)
     created = []
     for i in range(1, count):
         new = doc.addObject("Part::Feature", f"{base_name}_{i}")
-        new.Shape = src.Shape.copy()
+        new.Shape = src_shape.copy()
         rot = App.Rotation(axis, step * i)
         p = src.Placement
         new_base = rot.multVec(p.Base - center) + center
@@ -972,6 +1022,8 @@ def h_gui_set_view(params):
     import FreeCADGui as Gui
     params = params or {}
     view = (params.get("view") or "iso").lower()
+    if Gui.ActiveDocument is None or Gui.ActiveDocument.ActiveView is None:
+        raise LookupError("No active GUI view; open a document in FreeCAD GUI first.")
     v = Gui.ActiveDocument.ActiveView
     mapping = {
         "iso": v.viewIsometric,
@@ -1000,7 +1052,7 @@ def h_gui_fit_all(params):
 def h_get_bounding_box(params):
     doc = _get_doc(params)
     obj = _get_obj(doc, (params or {}).get("name"))
-    bb = obj.Shape.BoundBox
+    bb = _get_shape(obj).BoundBox
     return {"name": obj.Name,
             "min": {"x": bb.XMin, "y": bb.YMin, "z": bb.ZMin},
             "max": {"x": bb.XMax, "y": bb.YMax, "z": bb.ZMax},
@@ -1010,13 +1062,13 @@ def h_get_bounding_box(params):
 def h_get_volume(params):
     doc = _get_doc(params)
     obj = _get_obj(doc, (params or {}).get("name"))
-    return {"name": obj.Name, "volume": obj.Shape.Volume}
+    return {"name": obj.Name, "volume": _get_shape(obj).Volume}
 
 
 def h_get_area(params):
     doc = _get_doc(params)
     obj = _get_obj(doc, (params or {}).get("name"))
-    return {"name": obj.Name, "area": obj.Shape.Area}
+    return {"name": obj.Name, "area": _get_shape(obj).Area}
 
 
 def h_get_distance(params):
@@ -1025,10 +1077,12 @@ def h_get_distance(params):
     if "a" in params and "b" in params:
         a = _vec(params["a"]); b = _vec(params["b"])
         return {"distance": (b - a).Length}
+    if ("name1" in params) != ("name2" in params):
+        raise ValueError("get_distance requires both 'name1' and 'name2' (or points 'a' and 'b')")
     doc = _get_doc(params)
     o1 = _get_obj(doc, params["name1"])
     o2 = _get_obj(doc, params["name2"])
-    d, _, _ = o1.Shape.distToShape(o2.Shape)
+    d, _, _ = _get_shape(o1).distToShape(_get_shape(o2))
     return {"name1": o1.Name, "name2": o2.Name, "distance": d}
 
 
@@ -1044,7 +1098,7 @@ def h_shape_to_mesh(params):
     angular_def = float(params.get("angular_deflection", 0.523599))  # 30°
     name = params.get("name", src.Name + "_mesh")
     mesh = MeshPart.meshFromShape(
-        Shape=src.Shape,
+        Shape=_get_shape(src),
         LinearDeflection=linear_def,
         AngularDeflection=angular_def,
         Relative=False,
@@ -1218,16 +1272,26 @@ def h_fem_add_force(params):
         src = _get_obj(doc, params["references"]["object"])
         faces = params["references"].get("faces", [])
         c.References = [(src, tuple(f"Face{i}" for i in faces))]
-    # Apply direction if the build exposes DirectionVector (FreeCAD >= 0.20).
+    # FreeCAD 1.0's ConstraintForce exposes 'Direction' as a LinkSub (an edge
+    # or face reference), not a raw vector, so a vector can only be applied on
+    # builds with the legacy 'DirectionVector' property. Report honestly.
+    direction_applied = False
     try:
         if hasattr(c, "DirectionVector"):
             c.DirectionVector = d
+            direction_applied = True
     except Exception:
         pass
     analysis.addObject(c)
     doc.recompute()
-    return {"document": doc.Name, "constraint": c.Name, "force": c.Force,
-            "direction": {"x": d.x, "y": d.y, "z": d.z}}
+    result = {"document": doc.Name, "constraint": c.Name, "force": c.Force,
+              "direction": {"x": d.x, "y": d.y, "z": d.z},
+              "direction_applied": direction_applied}
+    if not direction_applied:
+        result["warning"] = ("This FreeCAD build does not expose a vector direction "
+                             "property; the requested direction was NOT applied. Set the "
+                             "constraint's Direction reference in the GUI if needed.")
+    return result
 
 
 # ==================== CAM / PATH ====================
